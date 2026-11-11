@@ -9,7 +9,7 @@
 #   messages:  /opt/nokhodi-chat/data/messages.json (NEVER deleted by update)
 #   service:   nokhodi-chat.service (systemd)
 set -u
-REPO="YOUR_GITHUB_USERNAME/nokhodi-chat"   # <-- CHANGE THIS to your GitHub repo
+REPO="sahand363/nokhodi-chat"   # <-- CHANGE THIS to your GitHub repo
 INSTALL_DIR="/opt/nokhodi-chat"
 BIN="$INSTALL_DIR/nokhodi-chat"
 CONFIG="$INSTALL_DIR/config.json"

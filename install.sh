@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # اتاق خواب نخودی — one-line installer for Ubuntu
 #
-#   curl -sSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/nokhodi-chat/main/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
 #
 # What it does (no compilation on the server):
 #   1. Downloads the pre-built linux/amd64 binary from the latest GitHub release
@@ -9,7 +9,7 @@
 #   3. Installs + starts the systemd service on port 44044
 #   4. Opens the management menu (./manage.sh) so you can set the shared login
 set -euo pipefail
-REPO="YOUR_GITHUB_USERNAME/nokhodi-chat"   # <-- CHANGE THIS to your GitHub repo
+REPO="sahand363/nokhodi-chat"   # <-- CHANGE THIS to your GitHub repo
 INSTALL_DIR="/opt/nokhodi-chat"
 PORT="44044"
 
