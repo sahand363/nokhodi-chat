@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7a9a3b">
+<title>اتاق خواب نخودی</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== Login: shared global credentials ===== -->
+  <section id="screen-login" class="screen">
+    <div class="card">
+      <div class="logo">🫛</div>
+      <h1>اتاق خواب نخودی</h1>
+      <p class="sub">برای ورود، نام کاربری و رمز عبور مشترک را وارد کنید</p>
+      <form id="login-form">
+        <label>نام کاربری
+          <input id="login-user" type="text" autocomplete="username" placeholder="نام کاربری" required>
+        </label>
+        <label>رمز عبور
+          <input id="login-pass" type="password" autocomplete="current-password" placeholder="رمز عبور" required>
+        </label>
+        <p id="login-error" class="error" hidden></p>
+        <button class="btn primary" type="submit">ورود</button>
+      </form>
+      <p class="hint">ورود شما تا ۷ روز روی همین مرورگر به خاطر سپرده می‌شود.</p>
+    </div>
+  </section>
+
+  <!-- ===== Identity: your own name + maths captcha ===== -->
+  <section id="screen-identity" class="screen" hidden>
+    <div class="card">
+      <div class="logo">👋</div>
+      <h1>خوش آمدید</h1>
+      <p class="sub">نام نمایشی خودتان را انتخاب کنید و کپچای ساده را حل کنید</p>
+      <form id="identity-form">
+        <label>نام نمایشی شما
+          <input id="display-name" type="text" maxlength="30" autocomplete="nickname" placeholder="مثلاً سارا" required>
+        </label>
+        <label>کپچا — حاصل را بنویسید
+          <span id="captcha-question" class="captcha">…</span>
+          <input id="captcha-answer" type="number" inputmode="numeric" placeholder="جواب" required>
+        </label>
+        <button id="captcha-refresh" type="button" class="link-btn">↻ سوال جدید</button>
+        <p id="identity-error" class="error" hidden></p>
+        <button class="btn primary" type="submit">ورود به چت</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== Chat ===== -->
+  <section id="screen-chat" class="screen chat-screen" hidden>
+    <header class="chat-header">
+      <div class="room">
+        <div class="room-avatar">🫛</div>
+        <div>
+          <h1>اتاق خواب نخودی</h1>
+          <p id="online-line"><span id="me-name"></span> • آنلاین</p>
+        </div>
+      </div>
+      <button id="logout-btn" class="icon-btn" title="خروج">🚪</button>
+    </header>
+
+    <main id="messages" class="messages" aria-live="polite"></main>
+
+    <div id="emoji-row" class="emoji-row" hidden>
+      <button type="button">😀</button><button type="button">😂</button><button type="button">😍</button>
+      <button type="button">🥰</button><button type="button">😊</button><button type="button">😉</button>
+      <button type="button">😎</button><button type="button">🤔</button><button type="button">😢</button>
+      <button type="button">😡</button><button type="button">👍</button><button type="button">👏</button>
+      <button type="button">🙏</button><button type="button">❤️</button><button type="button">🔥</button>
+      <button type="button">🎉</button><button type="button">🫛</button><button type="button">😴</button>
+    </div>
+
+    <footer class="composer">
+      <button id="emoji-btn" class="icon-btn" type="button" title="ایموجی">😊</button>
+      <input id="message-input" type="text" maxlength="1000" autocomplete="off"
+             placeholder="پیام بنویسید…" enterkeyhint="send">
+      <button id="send-btn" class="btn primary send" type="button">➤</button>
+    </footer>
+  </section>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
