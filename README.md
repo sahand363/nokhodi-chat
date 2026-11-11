@@ -1,4 +1,4 @@
-# 🫛 اتاق خواب نخودی — Self-Hosted Chat
+# 🫛 اتاق نخودی — Self-Hosted Chat
 
 A complete, modern, self-hosted web chat in **Go (standard library only — no external dependencies)**, built for an Ubuntu server. Mobile-first Persian RTL UI (Vazirmatn), real-time messages over SSE, persistent JSON storage, and a clean CLI management menu.
 
@@ -17,8 +17,7 @@ A complete, modern, self-hosted web chat in **Go (standard library only — no e
 ## 1. Publish it (once, on your computer)
 
 ```bash
-# 1. Create a GitHub repo, e.g. YOUR_USERNAME/nokhodi-chat, and push this folder.
-# 2. In install.sh and manage.sh, replace YOUR_GITHUB_USERNAME with your username.
+# 1. Repo is sahand363/nokhodi-chat — install.sh and manage.sh already use that name.
 git add . && git commit -m "nokhodi chat v1" && git push origin main
 
 # 3. Tag a release — GitHub Actions builds the binary automatically:
@@ -32,7 +31,7 @@ To release an update later: bump the code, then `git tag v1.0.1 && git push orig
 ## 2. Install on Ubuntu (one line, no compilation on the server)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/nokhodi-chat/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
 ```
 
 It downloads the pre-built binary, installs it to `/opt/nokhodi-chat`, creates the systemd service, starts it, and opens the management menu.
@@ -43,8 +42,10 @@ Then open: **http://&lt;server-ip&gt;:44044**
 
 ## 3. Management menu
 
+Type `nokhodichat` in any SSH session to open it (or `sudo /opt/nokhodi-chat/manage.sh`):
+
 ```bash
-sudo /opt/nokhodi-chat/manage.sh
+nokhodichat
 ```
 
 ```
@@ -80,7 +81,7 @@ sudo /opt/nokhodi-chat/manage.sh
   "salt": "<random hex>",
   "session_days": 7,
   "data_dir": "data",
-  "title": "اتاق خواب نخودی"
+  "title": "اتاق نخودی"
 }
 ```
 

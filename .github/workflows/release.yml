@@ -34,7 +34,7 @@ jobs:
       - name: Package release
         run: |
           tar -czf nokhodi-chat-linux-amd64.tar.gz \
-            nokhodi-chat manage.sh install.sh nokhodi-chat.service \
+            nokhodi-chat manage.sh install.sh nokhodichat nokhodi-chat.service \
             config.example.json README.md
 
       - name: Create GitHub Release

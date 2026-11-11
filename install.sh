@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# اتاق خواب نخودی — one-line installer for Ubuntu
+# اتاق نخودی — one-line installer for Ubuntu
 #
 #   curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
 #
@@ -7,13 +7,14 @@
 #   1. Downloads the pre-built linux/amd64 binary from the latest GitHub release
 #   2. Installs it to /opt/nokhodi-chat, creates config.json + data/
 #   3. Installs + starts the systemd service on port 44044
-#   4. Opens the management menu (./manage.sh) so you can set the shared login
+#   4. Installs the `nokhodichat` command (/usr/local/bin/nokhodichat) to open the menu
+#   5. Opens the management menu (./manage.sh) so you can set the shared login
 set -euo pipefail
-REPO="sahand363/nokhodi-chat"   # <-- CHANGE THIS to your GitHub repo
+REPO="sahand363/nokhodi-chat"
 INSTALL_DIR="/opt/nokhodi-chat"
 PORT="44044"
 
-echo "🫛 Installing اتاق خواب نخودی …"
+echo "🫛 Installing اتاق نخودی …"
 [ "$(id -u)" = "0" ] || { echo "Please run as root / with sudo."; exit 1; }
 command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl ca-certificates; }
 
@@ -31,6 +32,18 @@ cp -f "$TMP/nokhodi-chat" "$INSTALL_DIR/nokhodi-chat"
 chmod +x "$INSTALL_DIR/nokhodi-chat"
 [ -f "$TMP/manage.sh" ] && cp -f "$TMP/manage.sh" "$INSTALL_DIR/manage.sh" && chmod +x "$INSTALL_DIR/manage.sh"
 [ -f "$TMP/nokhodi-chat.service" ] && cp -f "$TMP/nokhodi-chat.service" /etc/systemd/system/nokhodi-chat.service
+# `nokhodichat` shortcut: type it in any SSH session to open the menu.
+if [ -f "$TMP/nokhodichat" ]; then
+  cp -f "$TMP/nokhodichat" /usr/local/bin/nokhodichat
+else
+  cat > /usr/local/bin/nokhodichat <<'EOF'
+#!/usr/bin/env bash
+if [ "$(id -u)" = "0" ]; then exec /opt/nokhodi-chat/manage.sh "$@"; else exec sudo /opt/nokhodi-chat/manage.sh "$@"; fi
+EOF
+fi
+chmod +x /usr/local/bin/nokhodichat
+# Existing installs may still have the old title in config.json — rename it.
+[ -f "$INSTALL_DIR/config.json" ] && sed -i 's/اتاق خواب نخودی/اتاق نخودی/g' "$INSTALL_DIR/config.json" || true
 
 # First run generates config.json (default admin / changeme123) if missing.
 if [ ! -f "$INSTALL_DIR/config.json" ]; then
@@ -44,6 +57,6 @@ IP="$(hostname -I | awk '{print $1}')"
 echo
 echo "✅ Done! Open:  http://$IP:$PORT"
 echo "   Default login: admin / changeme123  — change it now in the menu (option 3)."
-echo "   Manage later with:  sudo /opt/nokhodi-chat/manage.sh"
+echo "   Manage later with:  nokhodichat   (or sudo /opt/nokhodi-chat/manage.sh)"
 echo
 exec "$INSTALL_DIR/manage.sh"

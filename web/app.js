@@ -1,4 +1,4 @@
-// اتاق خواب نخودی — frontend: login -> display name + captcha -> chat (SSE).
+// اتاق نخودی — frontend: login -> display name + captcha -> chat (SSE).
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);

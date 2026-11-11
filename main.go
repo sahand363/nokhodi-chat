@@ -27,7 +27,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-var version = "1.0.0"
+var version = "1.0.2"
 
 // Config is the on-disk schema for config.json. The password is NEVER
 // stored in plain text — only a salted SHA-256 hash.
@@ -49,7 +49,7 @@ func defaultConfig() Config {
 		Username:    "admin",
 		SessionDays: 7,
 		DataDir:     "data",
-		Title:       "اتاق خواب نخودی",
+		Title:       "اتاق نخودی",
 	}
 }
 
@@ -111,7 +111,7 @@ func loadConfig(path string) (*Config, error) {
 		cfg.DataDir = "data"
 	}
 	if cfg.Title == "" {
-		cfg.Title = "اتاق خواب نخودی"
+		cfg.Title = "اتاق نخودی"
 	}
 	return &cfg, nil
 }
@@ -160,7 +160,7 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	log.Printf("اتاق خواب نخودی — nokhodi-chat %s listening on http://%s", version, addr)
+	log.Printf("اتاق نخودی — nokhodi-chat %s listening on http://%s", version, addr)
 	log.Printf("open http://<server-ip>:%d  (default login admin / changeme123 — change it!)", cfg.Port)
 	if err := http.ListenAndServe(addr, srv.routes()); err != nil {
 		log.Fatal(err)

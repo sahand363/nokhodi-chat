@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# اتاق خواب نخودی — server management menu (TUI)
+# اتاق نخودی — server management menu (TUI)
 # Run:  sudo ./manage.sh
 #        (or ./manage.sh when testing locally without systemd)
 #
@@ -9,7 +9,7 @@
 #   messages:  /opt/nokhodi-chat/data/messages.json (NEVER deleted by update)
 #   service:   nokhodi-chat.service (systemd)
 set -u
-REPO="sahand363/nokhodi-chat"   # <-- CHANGE THIS to your GitHub repo
+REPO="sahand363/nokhodi-chat"
 INSTALL_DIR="/opt/nokhodi-chat"
 BIN="$INSTALL_DIR/nokhodi-chat"
 CONFIG="$INSTALL_DIR/config.json"
@@ -52,6 +52,11 @@ download_binary() {
   # Ship the fresh manage.sh / service file alongside, if the release has them.
   [ -f "$tmp/manage.sh" ] && cp -f "$tmp/manage.sh" "$INSTALL_DIR/manage.sh" && chmod +x "$INSTALL_DIR/manage.sh"
   [ -f "$tmp/nokhodi-chat.service" ] && cp -f "$tmp/nokhodi-chat.service" "/etc/systemd/system/nokhodi-chat.service" 2>/dev/null || true
+  # Keep the `nokhodichat` shortcut installed, too.
+  if [ -f "$tmp/nokhodichat" ]; then cp -f "$tmp/nokhodichat" /usr/local/bin/nokhodichat 2>/dev/null || true; fi
+  [ -f /usr/local/bin/nokhodichat ] && chmod +x /usr/local/bin/nokhodichat 2>/dev/null || true
+  # Rename the title in an existing config, if it still has the old name.
+  [ -f "$CONFIG" ] && sed -i 's/اتاق خواب نخودی/اتاق نخودی/g' "$CONFIG" 2>/dev/null || true
   rm -rf "$tmp"
   ok "Binary updated: $($BIN version 2>/dev/null || echo ok)"
 }
@@ -171,7 +176,7 @@ do_uninstall() {
 while true; do
   clear
   echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║   🫛  اتاق خواب نخودی — Management    ║${NC}"
+  echo -e "${GREEN}║   🫛  اتاق نخودی — Management    ║${NC}"
   echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
   echo -e "  URL: ${CYAN}http://$(server_ip):$PORT${NC}"
   echo -e "  Dir: $INSTALL_DIR"
