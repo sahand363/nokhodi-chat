@@ -193,3 +193,12 @@ input:focus { outline: 2px solid var(--pea); border-color: var(--pea); backgroun
   word-break: break-all;
 }
 .file-card:hover { text-decoration: underline; }
+
+/* Version badge in the chat header (v2.2.1) */
+.app-version { font-size: 12px; font-weight: 400; color: var(--muted); }
+h1 .app-version { margin-inline-start: 4px; }
+
+/* Upload button (v2.2.1): sits right next to the send button, with a
+   visible background so it cannot be missed */
+.upload-btn { background: #e8f0d8; border: 1px solid #c8d8a8; }
+.upload-btn:hover { background: #dce8c2; }

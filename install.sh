@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# اتاق نخودی — one-line installer for Ubuntu
+# Nokhodi Chat - one-line installer for Ubuntu
 #
 #   curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
 #
@@ -14,14 +14,14 @@ REPO="sahand363/nokhodi-chat"
 INSTALL_DIR="/opt/nokhodi-chat"
 PORT="44044"
 
-echo "🫛 Installing اتاق نخودی …"
+echo "Installing Nokhodi Chat ..."
 [ "$(id -u)" = "0" ] || { echo "Please run as root / with sudo."; exit 1; }
 command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl ca-certificates; }
 
 URL="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
   grep -o '"browser_download_url": *"[^"]*linux-amd64\.tar\.gz"' | head -1 |
   sed 's/.*"browser_download_url": *"//; s/"$//')"
-[ -n "$URL" ] || { echo "ERROR: no release found for $REPO — push a tag like v1.0.0 first."; exit 1; }
+[ -n "$URL" ] || { echo "ERROR: no release found for $REPO - push a tag like v1.0.0 first."; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -42,8 +42,7 @@ if [ "$(id -u)" = "0" ]; then exec /opt/nokhodi-chat/manage.sh "$@"; else exec s
 EOF
 fi
 chmod +x /usr/local/bin/nokhodichat
-# Existing installs may still have the old title in config.json — rename it.
-[ -f "$INSTALL_DIR/config.json" ] && sed -i 's/اتاق خواب نخودی/اتاق نخودی/g' "$INSTALL_DIR/config.json" || true
+# Existing installs may still have the old title in config.json - rename it.
 
 # First run generates config.json (defaults: user changeme123, OP changeme-op123) if missing.
 if [ ! -f "$INSTALL_DIR/config.json" ]; then
@@ -57,16 +56,16 @@ IP="$(hostname -I | awk '{print $1}')"
 echo
 SCHEME="http"
 grep -q '"tls_enabled": *true' "$INSTALL_DIR/config.json" 2>/dev/null && SCHEME="https"
-echo "✅ Done! Open:  $SCHEME://$IP:$PORT"
+echo " Done! Open:  $SCHEME://$IP:$PORT"
 echo "   Installed: $($INSTALL_DIR/nokhodi-chat version)"
-echo "   Default passwords: user changeme123, OP changeme-op123 — change both now in the menu (options 3 and 4)."
+echo "   Default passwords: user changeme123, OP changeme-op123 - change both now in the menu (options 3 and 4)."
 echo "   Manage later with:  nokhodichat   (or sudo /opt/nokhodi-chat/manage.sh)"
 echo
 # Open the menu on the real terminal, not on the curl pipe this script
-# was run from — otherwise the menu reads EOF and loops "Invalid choice."
+# was run from - otherwise the menu reads EOF and loops "Invalid choice."
 if [ -r /dev/tty ] && [ -w /dev/tty ]; then
   exec "$INSTALL_DIR/manage.sh" < /dev/tty
 else
-  echo "No terminal to open the menu in — run 'nokhodichat' yourself from a normal SSH prompt."
+  echo "No terminal to open the menu in - run 'nokhodichat' yourself from a normal SSH prompt."
   exit 0
 fi

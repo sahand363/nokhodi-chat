@@ -90,6 +90,11 @@ func (s *Server) routes() http.Handler {
 
 	web, _ := fs.Sub(webFS, "web")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// No-cache for the web UI: after a server update, a browser
+		// that reloads must get the NEW page, not a cached old one.
+		// (An already-open tab still needs a reload — updating the
+		// server cannot reload a page that is already open.)
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		if r.URL.Path != "/" {
 			http.FileServer(http.FS(web)).ServeHTTP(w, r)
 			return

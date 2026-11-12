@@ -544,7 +544,18 @@
     await selectRoom("general");
   }
 
+  // Version badge in the chat header (and on the login screen):
+  // shows which version THIS open tab is running, so a stale tab
+  // after a server update is obvious at a glance.
+  async function loadVersion() {
+    try {
+      const h = await api("/health");
+      document.querySelectorAll(".app-version").forEach((el) => { el.textContent = "v" + h.version; });
+    } catch (_) {}
+  }
+
   (async function boot() {
+    loadVersion();
     try {
       const meData = await api("/api/me");
       if (!meData.authenticated) { show("login"); return; }

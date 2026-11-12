@@ -88,10 +88,11 @@ The room list is on the side of the screen (tap ☰ on a phone to open it).
 
 - Click 🗑 on a message to delete it — your own messages, or **any** message if you're the OP.
 - The header of each room tells you its self-destruct setting, e.g. "پیام‌ها بعد از ۲۴ ساعت پاک می‌شوند".
+- The chat header shows the version (e.g. `v2.2.1`) next to the room name — that's the version the open tab is running. After a server update, **close the tab and open the chat again** (or hard-refresh with Ctrl+Shift+R): updating the server cannot reload a page that is already open, and the version badge is how you can tell at a glance whether the tab is on the new version.
 
 ### Sending images and files
 
-Click the **📎** button next to the message box (or write a caption first, then click 📎 — the caption is sent with the file).
+Click the **📎** button right next to the ➤ send button (or write a caption first, then click 📎 — the caption is sent with the file).
 
 - **Images** (JPG, PNG, WebP, **GIF** — animated GIFs play) are shown **big in the chat** (up to 320 px wide). Click an image to open it full-size in a new tab.
 - **Other files** (PDF, TXT, MD, CSV, ZIP, MP3, MP4, Word / Excel / PowerPoint) show as a **download card** with the file name and size — click it to download.
@@ -402,6 +403,7 @@ go run . -config config.json
 |---|---|
 | Login says the password is wrong | In v2 the login is **password only** — there is no username box. Make sure you're typing the user password (for everyone) or the OP password (for you), not the old v1 `admin` login. If you forgot it, reset it on the server with the `passwd` commands in [Passwords](#passwords). |
 | After enabling SSL, `http://` shows an error | That's expected — the same port now speaks HTTPS only. Use `https://<server-ip>:44044` instead. |
+| After an update, the chat looks the same / a new button is missing | The tab was open before the update — the server can't reload it. Close the tab and open the chat again, or hard-refresh with Ctrl+Shift+R. The version badge in the header tells you which version the tab is running. |
 | Browser warns about a self-signed certificate | Normal for self-signed. Click Advanced → Proceed (Chrome / Firefox). For no warning at all, use Let's Encrypt with a domain instead. |
 | Let's Encrypt fails | Check the domain's DNS A record really points to the server IP, and port 80 is open (`sudo ufw allow 80/tcp`, and nothing else is using port 80). Then try menu option 5 to re-issue. |
 | Menu prints "Invalid choice." with no typing, and flickers | The menu was started from a pipe, not from your keyboard. Fixed in v2.0.1 — update to v2.0.1, then run `nokhodichat` from a normal SSH prompt. |
@@ -426,6 +428,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.2.1** — Version badge in the chat header (and login screen), no-cache headers so a reloaded tab always gets the new page, 📎 moved next to the send button with a visible background, SSH menu is plain ASCII only (no Persian characters — the old box-drawing header showed as boxes in some terminals).
 - **v2.2.0** — Images and files in chat: 📎 upload button, images (incl. animated GIFs) shown big, other files as download cards, per-user limits (10 MB per file, 20 files / 100 MB per day, 200 MB stored), files deleted with their message.
 - **v2.1.0** — SSL / TLS from the menu: self-signed or Let's Encrypt, disable, delete, and re-issue. Same port serves HTTPS when on, HTTP when off.
 - **v2.0.1** — Menu fix: reads input from the real terminal (no more "Invalid choice." loop from a pipe), version shown in the menu header, uninstall also removes `nokhodichat`.

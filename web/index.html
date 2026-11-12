@@ -27,6 +27,7 @@
         <button class="btn primary" type="submit">ورود</button>
       </form>
       <p class="hint">ورود شما تا ۷ روز روی همین مرورگر به خاطر سپرده می‌شود.</p>
+      <p class="hint app-version"></p>
     </div>
   </section>
 
@@ -75,7 +76,7 @@
           <div class="room">
             <div class="room-avatar">🫛</div>
             <div>
-              <h1 id="room-title">#general</h1>
+              <h1 id="room-title">#general <span class="app-version"></span></h1>
               <p id="online-line"><span id="me-name"></span> • <span id="room-ttl"></span></p>
             </div>
           </div>
@@ -95,11 +96,11 @@
 
         <footer class="composer">
           <button id="emoji-btn" class="icon-btn" type="button" title="ایموجی">😊</button>
-          <button id="upload-btn" class="icon-btn" type="button" title="ارسال عکس یا فایل (حداکثر ۱۰ مگابایت)">📎</button>
-          <input id="file-input" type="file" hidden
-                 accept="image/*,.pdf,.txt,.md,.csv,.zip,.mp3,.mp4,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
           <input id="message-input" type="text" maxlength="1000" autocomplete="off"
                  placeholder="پیام بنویسید… (/help برای دستورها)" enterkeyhint="send">
+          <button id="upload-btn" class="icon-btn upload-btn" type="button" title="ارسال عکس یا فایل (حداکثر ۱۰ مگابایت)">📎</button>
+          <input id="file-input" type="file" hidden
+                 accept="image/*,.pdf,.txt,.md,.csv,.zip,.mp3,.mp4,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
           <button id="send-btn" class="btn primary send" type="button">➤</button>
         </footer>
       </div>

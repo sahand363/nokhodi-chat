@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# اتاق نخودی — server management menu (TUI)
+# Nokhodi Chat - server management menu (TUI)
 # Run:  sudo ./manage.sh
 #        (or ./manage.sh when testing locally without systemd)
 #
@@ -14,16 +14,16 @@ set -u
 # When this menu is launched from a pipe (e.g. `curl ... | sudo bash`
 # ending in `exec manage.sh`), stdin is the pipe, not your keyboard.
 # `read` then gets EOF instantly, choice is empty, the menu prints
-# "Invalid choice.", clears, and loops forever — the flicker every
+# "Invalid choice.", clears, and loops forever - the flicker every
 # few seconds. So: take input from the real terminal (/dev/tty)
 # instead, and if there is no terminal at all, exit instead of looping.
 if [ ! -t 0 ]; then
   # Test-open /dev/tty in a subshell first: merely existing is not
-  # enough — opening it fails when there is no controlling terminal.
+  # enough - opening it fails when there is no controlling terminal.
   if (exec 0</dev/tty) 2>/dev/null; then
     exec 0</dev/tty
   else
-    echo "No terminal input available — run 'nokhodichat' from a normal SSH prompt, not from a pipe."
+    echo "No terminal input available - run 'nokhodichat' from a normal SSH prompt, not from a pipe."
     exit 1
   fi
 fi
@@ -39,7 +39,7 @@ info()  { echo -e "${CYAN}$*${NC}"; }
 ok()    { echo -e "${GREEN}$*${NC}"; }
 warn()  { echo -e "${YELLOW}$*${NC}"; }
 err()   { echo -e "${RED}$*${NC}"; }
-pause() { read -rp "Press Enter to return to the menu…" _; }
+pause() { read -rp "Press Enter to return to the menu..." _; }
 
 server_ip() {
   hostname -I 2>/dev/null | awk '{print $1}'
@@ -86,19 +86,19 @@ ssl_status_line() {
 }
 
 do_ssl_selfsigned() {
-  echo; info "== Enable SSL — Self-Signed Certificate =="
-  info "No domain needed. Works with your server IP — but browsers will"
+  echo; info "== Enable SSL - Self-Signed Certificate =="
+  info "No domain needed. Works with your server IP - but browsers will"
   info "show a warning (\"not secure / proceed anyway\") because the"
   info "certificate is not signed by a public authority. That is normal."
-  command -v openssl >/dev/null || { info "Installing openssl…"; apt-get update -qq && apt-get install -y -qq openssl || { err "Could not install openssl."; pause; return; }; }
-  read -rp "Domain name (optional — press Enter to use the server IP only): " domain
+  command -v openssl >/dev/null || { info "Installing openssl..."; apt-get update -qq && apt-get install -y -qq openssl || { err "Could not install openssl."; pause; return; }; }
+  read -rp "Domain name (optional - press Enter to use the server IP only): " domain
   local ip san cn
   ip="$(server_ip)"
   cn="${domain:-$ip}"
   san="IP:$ip,IP:127.0.0.1,DNS:localhost"
   [ -n "$domain" ] && san="DNS:$domain,$san"
   mkdir -p "$TLS_DIR"
-  info "Generating a 365-day certificate for $cn …"
+  info "Generating a 365-day certificate for $cn ..."
   openssl req -x509 -newkey rsa:2048 -nodes \
     -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" \
     -days 365 -subj "/CN=$cn" -addext "subjectAltName=$san" \
@@ -109,29 +109,29 @@ do_ssl_selfsigned() {
     || { err "Failed to enable TLS in config."; pause; return; }
   restart_service
   ok "SSL is ON (self-signed). Open: https://$cn:$PORT"
-  warn "First visit: your browser will warn about the certificate — click Advanced → Proceed. That only happens because it is self-signed."
+  warn "First visit: your browser will warn about the certificate - click Advanced -> Proceed. That only happens because it is self-signed."
   info "Expires: $(openssl x509 -in "$TLS_DIR/cert.pem" -noout -enddate 2>/dev/null | sed 's/notAfter=//')"
   pause
 }
 
 do_ssl_letsencrypt() {
-  echo; info "== Enable SSL — Let's Encrypt (trusted certificate) =="
+  echo; info "== Enable SSL - Let's Encrypt (trusted certificate) =="
   info "Needs a domain name that already points to this server (DNS A"
-  info "record → $(server_ip)). The certificate is free, trusted by"
+  info "record -> $(server_ip)). The certificate is free, trusted by"
   info "browsers (no warning), and renews itself automatically."
   read -rp "Domain name (e.g. chat.example.com): " domain
   [ -n "$domain" ] || { err "A domain name is required for Let's Encrypt."; pause; return; }
-  command -v certbot >/dev/null || { info "Installing certbot…"; apt-get update -qq && apt-get install -y -qq certbot || { err "Could not install certbot."; pause; return; }; }
+  command -v certbot >/dev/null || { info "Installing certbot..."; apt-get update -qq && apt-get install -y -qq certbot || { err "Could not install certbot."; pause; return; }; }
   command -v ufw >/dev/null && ufw allow 80/tcp >/dev/null 2>&1 || true
   if command -v ss >/dev/null && ss -tln 2>/dev/null | grep -q ':80 '; then
-    warn "Something is already listening on port 80 — certbot needs port 80 free to prove you own the domain."
+    warn "Something is already listening on port 80 - certbot needs port 80 free to prove you own the domain."
     warn "Stop that service first, or use the self-signed option instead."
     pause; return
   fi
-  info "Asking Let's Encrypt for a certificate for $domain … (this needs port 80 open)"
+  info "Asking Let's Encrypt for a certificate for $domain ... (this needs port 80 open)"
   certbot certonly --standalone --non-interactive --agree-tos \
     --register-unsafely-without-email -d "$domain" \
-    || { err "Let's Encrypt failed — check that $domain really points to $(server_ip) and port 80 is reachable."; pause; return; }
+    || { err "Let's Encrypt failed - check that $domain really points to $(server_ip) and port 80 is reachable."; pause; return; }
   # Restart the chat when certbot renews the certificate.
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
   cat > /etc/letsencrypt/renewal-hooks/deploy/nokhodi-chat.sh <<'EOF'
@@ -152,7 +152,7 @@ EOF
 
 do_ssl_disable() {
   echo; info "== Disable SSL (back to plain HTTP) =="
-  info "The certificate files are kept on disk — you can turn SSL back on"
+  info "The certificate files are kept on disk - you can turn SSL back on"
   info "again without generating a new certificate."
   "$BIN" tls -config "$CONFIG" -enable false || { err "Failed to disable TLS."; pause; return; }
   restart_service
@@ -197,28 +197,28 @@ do_ssl_reissue() {
   case "$kind" in
     1) do_ssl_selfsigned ;;
     2) do_ssl_letsencrypt ;;
-    *) warn "Cancelled — SSL is off for now."; pause ;;
+    *) warn "Cancelled - SSL is off for now."; pause ;;
   esac
 }
 
 do_ssl_menu() {
   while true; do
     clear
-    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║   🫛  اتاق نخودی — SSL / TLS      ║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo -e "${GREEN}+------------------------------------------+${NC}"
+    echo -e "${GREEN}|     Nokhodi Chat - SSL / TLS      |${NC}"
+    echo -e "${GREEN}+------------------------------------------+${NC}"
     echo -e "  $(ssl_status_line)"
     echo -e "  URL: ${CYAN}$(scheme)://$(server_ip):$PORT${NC}"
     echo
-    echo "  1) Enable SSL — Self-signed (no domain needed, browser will warn)"
-    echo "  2) Enable SSL — Let's Encrypt (needs a domain, no warning)"
-    echo "  3) Disable SSL (back to plain HTTP — keeps the certificate)"
+    echo "  1) Enable SSL - Self-signed (no domain needed, browser will warn)"
+    echo "  2) Enable SSL - Let's Encrypt (needs a domain, no warning)"
+    echo "  3) Disable SSL (back to plain HTTP - keeps the certificate)"
     echo "  4) Delete SSL certificate (removes it + turns SSL off)"
     echo "  5) Delete & get a new certificate (re-issue)"
     echo "  0) Back to main menu"
     echo
     if ! read -rp "Choose [0-5]: " choice; then
-      echo; echo "Input closed — exiting menu."
+      echo; echo "Input closed - exiting menu."
       exit 0
     fi
     case "$choice" in
@@ -245,7 +245,7 @@ latest_release_url() {
 download_binary() {
   local url tmp
   url="$(latest_release_url)"
-  [ -n "$url" ] || { err "Could not find a release for $REPO — did you push a tag (v1.0.0) yet?"; return 1; }
+  [ -n "$url" ] || { err "Could not find a release for $REPO - did you push a tag (v1.0.0) yet?"; return 1; }
   info "Downloading $url"
   tmp="$(mktemp -d)"
   curl -fsSL -o "$tmp/release.tar.gz" "$url" || { err "Download failed."; rm -rf "$tmp"; return 1; }
@@ -262,7 +262,6 @@ download_binary() {
   if [ -f "$tmp/nokhodichat" ]; then cp -f "$tmp/nokhodichat" /usr/local/bin/nokhodichat 2>/dev/null || true; fi
   [ -f /usr/local/bin/nokhodichat ] && chmod +x /usr/local/bin/nokhodichat 2>/dev/null || true
   # Rename the title in an existing config, if it still has the old name.
-  [ -f "$CONFIG" ] && sed -i 's/اتاق خواب نخودی/اتاق نخودی/g' "$CONFIG" 2>/dev/null || true
   rm -rf "$tmp"
   ok "Binary updated: $($BIN version 2>/dev/null || echo ok)"
 }
@@ -270,7 +269,7 @@ download_binary() {
 do_install_start() {
   echo; info "== Install / Start Service =="
   if [ ! -f "$BIN" ]; then
-    info "No binary yet — downloading the latest release…"
+    info "No binary yet - downloading the latest release..."
     download_binary || { pause; return; }
   fi
   mkdir -p "$INSTALL_DIR/data"
@@ -288,7 +287,7 @@ do_install_start() {
     systemctl enable --now "$SERVICE"
     systemctl status "$SERVICE" --no-pager | head -20
   else
-    warn "No systemd here — starting in the background with nohup."
+    warn "No systemd here - starting in the background with nohup."
     pkill -f "$BIN" 2>/dev/null || true
     (cd "$INSTALL_DIR" && nohup "$BIN" -config "$CONFIG" >>"$INSTALL_DIR/chat.log" 2>&1 &)
     sleep 1
@@ -299,8 +298,8 @@ do_install_start() {
 }
 
 do_update() {
-  echo; info "== Update (keeps config.json + data/ — messages are NOT wiped) =="
-  [ -f "$BIN" ] || { err "Nothing installed yet — use option 1 first."; pause; return; }
+  echo; info "== Update (keeps config.json + data/ - messages are NOT wiped) =="
+  [ -f "$BIN" ] || { err "Nothing installed yet - use option 1 first."; pause; return; }
   warn "Current: $($BIN version)"
   download_binary || { pause; return; }
   if has_systemd; then
@@ -331,7 +330,7 @@ do_set_credentials() {
   [ "$pass" = "$pass2" ] || { err "Passwords do not match."; pause; return; }
   [ "${#pass}" -ge 6 ] || { err "Password must be at least 6 characters."; pause; return; }
   if [ ! -f "$BIN" ]; then
-    err "Binary not found at $BIN — install first (option 1)."
+    err "Binary not found at $BIN - install first (option 1)."
     pause; return
   fi
   # Create a config first if none exists (binary creates the default one).
@@ -343,7 +342,7 @@ do_set_credentials() {
   ok "$role password updated."
   if [ "$role" = "user" ]; then ok "Tell your users the new shared login."; fi
   if has_systemd && systemctl is-active --quiet "$SERVICE"; then
-    info "Restarting the service so the new login takes effect…"
+    info "Restarting the service so the new login takes effect..."
     systemctl restart "$SERVICE"
   fi
   pause
@@ -392,25 +391,25 @@ do_uninstall() {
 
 while true; do
   clear
-  echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║   🫛  اتاق نخودی — Management    ║${NC}"
-  echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+  echo -e "${GREEN}+------------------------------------------+${NC}"
+  echo -e "${GREEN}|     Nokhodi Chat - Management    |${NC}"
+  echo -e "${GREEN}+------------------------------------------+${NC}"
   echo -e "  URL: ${CYAN}$(scheme)://$(server_ip):$PORT${NC}"
   echo -e "  Dir: $INSTALL_DIR"
   echo -e "  Version: $(installed_version)"
   echo -e "  $(ssl_status_line)"
   echo
   echo "  1) Install / Start Service"
-  echo "  2) Update (latest release — keeps messages, rooms & config)"
+  echo "  2) Update (latest release - keeps messages, rooms & config)"
   echo "  3) Set User Password (everyone else)"
-  echo "  4) Set OP Password (only you — the admin)"
+  echo "  4) Set OP Password (only you - the admin)"
   echo "  5) Status"
   echo "  6) Uninstall"
-  echo "  7) SSL — Enable / Disable / Delete / Re-issue"
+  echo "  7) SSL - Enable / Disable / Delete / Re-issue"
   echo "  0) Exit"
   echo
   if ! read -rp "Choose [0-7]: " choice; then
-    echo; echo "Input closed — exiting menu."
+    echo; echo "Input closed - exiting menu."
     exit 0
   fi
   case "$choice" in
@@ -421,7 +420,7 @@ while true; do
     5) do_status ;;
     6) do_uninstall ;;
     7) do_ssl_menu ;;
-    0) echo "Bye 👋"; exit 0 ;;
+    0) echo "Bye"; exit 0 ;;
     *) warn "Invalid choice."; sleep 1 ;;
   esac
 done
