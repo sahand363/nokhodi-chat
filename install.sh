@@ -55,7 +55,9 @@ systemctl enable --now nokhodi-chat
 sleep 1
 IP="$(hostname -I | awk '{print $1}')"
 echo
-echo "✅ Done! Open:  http://$IP:$PORT"
+SCHEME="http"
+grep -q '"tls_enabled": *true' "$INSTALL_DIR/config.json" 2>/dev/null && SCHEME="https"
+echo "✅ Done! Open:  $SCHEME://$IP:$PORT"
 echo "   Installed: $($INSTALL_DIR/nokhodi-chat version)"
 echo "   Default passwords: user changeme123, OP changeme-op123 — change both now in the menu (options 3 and 4)."
 echo "   Manage later with:  nokhodichat   (or sudo /opt/nokhodi-chat/manage.sh)"

@@ -162,6 +162,17 @@ func TestBrokerRoomIsolation(t *testing.T) {
 	}
 }
 
+func TestTLSConfigDefaultsOff(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.TLSEnabled || cfg.scheme() != "http" {
+		t.Fatal("TLS must be off by default — plain HTTP keeps working")
+	}
+	cfg.TLSEnabled = true
+	if cfg.scheme() != "https" {
+		t.Fatal("scheme should be https when TLS is enabled")
+	}
+}
+
 func TestCaptchaVerifyOnce(t *testing.T) {
 	c := NewCaptchaStore()
 	id, q, err := c.New()

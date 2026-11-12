@@ -49,6 +49,190 @@ installed_version() {
   if [ -x "$BIN" ]; then "$BIN" version 2>/dev/null || echo "unknown"; else echo "not installed"; fi
 }
 
+# --- SSL / TLS helpers (v2.1.0) ---
+# SSL is optional and toggled from this menu. When it is on, the same
+# port (44044) serves HTTPS instead of HTTP; when it is off, plain HTTP
+# works again. Certificates live in $INSTALL_DIR/tls/ (self-signed) or
+# in /etc/letsencrypt/live/<domain>/ (Let's Encrypt).
+TLS_DIR="$INSTALL_DIR/tls"
+
+tls_enabled() { [ -f "$CONFIG" ] && grep -q '"tls_enabled": *true' "$CONFIG"; }
+tls_mode()    { [ -f "$CONFIG" ] && grep -o '"tls_mode": *"[^"]*"' "$CONFIG" | sed 's/.*: *"//; s/"$//' || echo ""; }
+tls_domain()  { [ -f "$CONFIG" ] && grep -o '"tls_domain": *"[^"]*"' "$CONFIG" | sed 's/.*: *"//; s/"$//' || echo ""; }
+tls_cert()    { [ -f "$CONFIG" ] && grep -o '"tls_cert_file": *"[^"]*"' "$CONFIG" | sed 's/.*: *"//; s/"$//' || echo ""; }
+
+scheme() { if tls_enabled; then echo "https"; else echo "http"; fi; }
+
+restart_service() {
+  if has_systemd; then
+    systemctl restart "$SERVICE" 2>/dev/null || systemctl start "$SERVICE" 2>/dev/null || true
+  else
+    pkill -f "$BIN" 2>/dev/null || true
+    (cd "$INSTALL_DIR" && nohup "$BIN" -config "$CONFIG" >>"$INSTALL_DIR/chat.log" 2>&1 &)
+    sleep 1
+  fi
+}
+
+ssl_status_line() {
+  if tls_enabled; then
+    local cert expiry
+    cert="$(tls_cert)"
+    expiry="unknown"
+    [ -n "$cert" ] && [ -f "$cert" ] && expiry="$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | sed 's/notAfter=//')"
+    echo "SSL: ON ($(tls_mode), domain: $(tls_domain), expires: $expiry)"
+  else
+    echo "SSL: OFF (plain HTTP)"
+  fi
+}
+
+do_ssl_selfsigned() {
+  echo; info "== Enable SSL — Self-Signed Certificate =="
+  info "No domain needed. Works with your server IP — but browsers will"
+  info "show a warning (\"not secure / proceed anyway\") because the"
+  info "certificate is not signed by a public authority. That is normal."
+  command -v openssl >/dev/null || { info "Installing openssl…"; apt-get update -qq && apt-get install -y -qq openssl || { err "Could not install openssl."; pause; return; }; }
+  read -rp "Domain name (optional — press Enter to use the server IP only): " domain
+  local ip san cn
+  ip="$(server_ip)"
+  cn="${domain:-$ip}"
+  san="IP:$ip,IP:127.0.0.1,DNS:localhost"
+  [ -n "$domain" ] && san="DNS:$domain,$san"
+  mkdir -p "$TLS_DIR"
+  info "Generating a 365-day certificate for $cn …"
+  openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem" \
+    -days 365 -subj "/CN=$cn" -addext "subjectAltName=$san" \
+    || { err "Certificate generation failed."; pause; return; }
+  chmod 600 "$TLS_DIR/key.pem"; chmod 644 "$TLS_DIR/cert.pem"
+  "$BIN" tls -config "$CONFIG" -enable true -mode selfsigned \
+    -domain "$domain" -cert "$TLS_DIR/cert.pem" -key "$TLS_DIR/key.pem" \
+    || { err "Failed to enable TLS in config."; pause; return; }
+  restart_service
+  ok "SSL is ON (self-signed). Open: https://$cn:$PORT"
+  warn "First visit: your browser will warn about the certificate — click Advanced → Proceed. That only happens because it is self-signed."
+  info "Expires: $(openssl x509 -in "$TLS_DIR/cert.pem" -noout -enddate 2>/dev/null | sed 's/notAfter=//')"
+  pause
+}
+
+do_ssl_letsencrypt() {
+  echo; info "== Enable SSL — Let's Encrypt (trusted certificate) =="
+  info "Needs a domain name that already points to this server (DNS A"
+  info "record → $(server_ip)). The certificate is free, trusted by"
+  info "browsers (no warning), and renews itself automatically."
+  read -rp "Domain name (e.g. chat.example.com): " domain
+  [ -n "$domain" ] || { err "A domain name is required for Let's Encrypt."; pause; return; }
+  command -v certbot >/dev/null || { info "Installing certbot…"; apt-get update -qq && apt-get install -y -qq certbot || { err "Could not install certbot."; pause; return; }; }
+  command -v ufw >/dev/null && ufw allow 80/tcp >/dev/null 2>&1 || true
+  if command -v ss >/dev/null && ss -tln 2>/dev/null | grep -q ':80 '; then
+    warn "Something is already listening on port 80 — certbot needs port 80 free to prove you own the domain."
+    warn "Stop that service first, or use the self-signed option instead."
+    pause; return
+  fi
+  info "Asking Let's Encrypt for a certificate for $domain … (this needs port 80 open)"
+  certbot certonly --standalone --non-interactive --agree-tos \
+    --register-unsafely-without-email -d "$domain" \
+    || { err "Let's Encrypt failed — check that $domain really points to $(server_ip) and port 80 is reachable."; pause; return; }
+  # Restart the chat when certbot renews the certificate.
+  mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+  cat > /etc/letsencrypt/renewal-hooks/deploy/nokhodi-chat.sh <<'EOF'
+#!/bin/sh
+systemctl restart nokhodi-chat 2>/dev/null || true
+EOF
+  chmod +x /etc/letsencrypt/renewal-hooks/deploy/nokhodi-chat.sh
+  "$BIN" tls -config "$CONFIG" -enable true -mode letsencrypt \
+    -domain "$domain" \
+    -cert "/etc/letsencrypt/live/$domain/fullchain.pem" \
+    -key "/etc/letsencrypt/live/$domain/privkey.pem" \
+    || { err "Failed to enable TLS in config."; pause; return; }
+  restart_service
+  ok "SSL is ON (Let's Encrypt). Open: https://$domain:$PORT"
+  info "The certificate renews automatically (certbot timer) and the chat restarts on renewal."
+  pause
+}
+
+do_ssl_disable() {
+  echo; info "== Disable SSL (back to plain HTTP) =="
+  info "The certificate files are kept on disk — you can turn SSL back on"
+  info "again without generating a new certificate."
+  "$BIN" tls -config "$CONFIG" -enable false || { err "Failed to disable TLS."; pause; return; }
+  restart_service
+  ok "SSL is OFF. Open: http://$(server_ip):$PORT"
+  pause
+}
+
+do_ssl_delete() {
+  echo; info "== Delete SSL Certificate =="
+  warn "This deletes the certificate files and turns SSL off."
+  read -rp "Are you sure? [y/N]: " confirm
+  [[ "$confirm" =~ ^[Yy]$ ]] || { info "Cancelled."; pause; return; }
+  local domain mode
+  domain="$(tls_domain)"; mode="$(tls_mode)"
+  "$BIN" tls -config "$CONFIG" -clear 2>/dev/null || true
+  rm -rf "$TLS_DIR"
+  if [ "$mode" = "letsencrypt" ] && [ -n "$domain" ] && command -v certbot >/dev/null; then
+    certbot delete --cert-name "$domain" --non-interactive 2>/dev/null || true
+    rm -f /etc/letsencrypt/renewal-hooks/deploy/nokhodi-chat.sh
+  fi
+  restart_service
+  ok "SSL certificate deleted. The chat is back on plain HTTP: http://$(server_ip):$PORT"
+  pause
+}
+
+do_ssl_reissue() {
+  echo; info "== Delete & Get a New Certificate =="
+  info "This deletes the current certificate, then makes a new one."
+  read -rp "Are you sure? [y/N]: " confirm
+  [[ "$confirm" =~ ^[Yy]$ ]] || { info "Cancelled."; pause; return; }
+  local domain mode
+  domain="$(tls_domain)"; mode="$(tls_mode)"
+  "$BIN" tls -config "$CONFIG" -clear 2>/dev/null || true
+  rm -rf "$TLS_DIR"
+  if [ "$mode" = "letsencrypt" ] && [ -n "$domain" ] && command -v certbot >/dev/null; then
+    certbot delete --cert-name "$domain" --non-interactive 2>/dev/null || true
+  fi
+  ok "Old certificate deleted. Now choose the new one:"
+  echo "  1) Self-signed (no domain needed, browser will warn)"
+  echo "  2) Let's Encrypt (needs a domain, no browser warning)"
+  read -rp "Choose [1-2]: " kind
+  case "$kind" in
+    1) do_ssl_selfsigned ;;
+    2) do_ssl_letsencrypt ;;
+    *) warn "Cancelled — SSL is off for now."; pause ;;
+  esac
+}
+
+do_ssl_menu() {
+  while true; do
+    clear
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║   🫛  اتاق نخودی — SSL / TLS      ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo -e "  $(ssl_status_line)"
+    echo -e "  URL: ${CYAN}$(scheme)://$(server_ip):$PORT${NC}"
+    echo
+    echo "  1) Enable SSL — Self-signed (no domain needed, browser will warn)"
+    echo "  2) Enable SSL — Let's Encrypt (needs a domain, no warning)"
+    echo "  3) Disable SSL (back to plain HTTP — keeps the certificate)"
+    echo "  4) Delete SSL certificate (removes it + turns SSL off)"
+    echo "  5) Delete & get a new certificate (re-issue)"
+    echo "  0) Back to main menu"
+    echo
+    if ! read -rp "Choose [0-5]: " choice; then
+      echo; echo "Input closed — exiting menu."
+      exit 0
+    fi
+    case "$choice" in
+      1) do_ssl_selfsigned ;;
+      2) do_ssl_letsencrypt ;;
+      3) do_ssl_disable ;;
+      4) do_ssl_delete ;;
+      5) do_ssl_reissue ;;
+      0) return ;;
+      *) warn "Invalid choice."; sleep 1 ;;
+    esac
+  done
+}
+
 has_systemd() { command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; }
 
 latest_release_url() {
@@ -172,7 +356,8 @@ do_status() {
   echo "Config:      $([ -f "$CONFIG" ] && echo exists || echo missing)"
   echo "Messages:    $(grep -h -c '"id"' "$INSTALL_DIR"/data/room_*.json 2>/dev/null | awk '{s+=$1} END {print s+0}') stored"
   echo "Rooms:       $([ -f "$INSTALL_DIR/data/rooms.json" ] && grep -c '"id"' "$INSTALL_DIR/data/rooms.json" || echo 0)"
-  echo "URL:         http://$(server_ip):$PORT"
+  echo "URL:         $(scheme)://$(server_ip):$PORT"
+  echo "SSL:         $(ssl_status_line)"
   if has_systemd; then systemctl status "$SERVICE" --no-pager | head -20
   else curl -fsS "http://127.0.0.1:$PORT/health" || echo "not running"; echo; fi
   pause
@@ -210,9 +395,10 @@ while true; do
   echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
   echo -e "${GREEN}║   🫛  اتاق نخودی — Management    ║${NC}"
   echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
-  echo -e "  URL: ${CYAN}http://$(server_ip):$PORT${NC}"
+  echo -e "  URL: ${CYAN}$(scheme)://$(server_ip):$PORT${NC}"
   echo -e "  Dir: $INSTALL_DIR"
   echo -e "  Version: $(installed_version)"
+  echo -e "  $(ssl_status_line)"
   echo
   echo "  1) Install / Start Service"
   echo "  2) Update (latest release — keeps messages, rooms & config)"
@@ -220,9 +406,10 @@ while true; do
   echo "  4) Set OP Password (only you — the admin)"
   echo "  5) Status"
   echo "  6) Uninstall"
+  echo "  7) SSL — Enable / Disable / Delete / Re-issue"
   echo "  0) Exit"
   echo
-  if ! read -rp "Choose [0-6]: " choice; then
+  if ! read -rp "Choose [0-7]: " choice; then
     echo; echo "Input closed — exiting menu."
     exit 0
   fi
@@ -233,6 +420,7 @@ while true; do
     4) do_set_credentials op ;;
     5) do_status ;;
     6) do_uninstall ;;
+    7) do_ssl_menu ;;
     0) echo "Bye 👋"; exit 0 ;;
     *) warn "Invalid choice."; sleep 1 ;;
   esac

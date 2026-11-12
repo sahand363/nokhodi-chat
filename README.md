@@ -160,6 +160,7 @@ The menu header shows the installed version, so you can see at a glance which ve
   4) Set OP Password (only you — the admin)
   5) Status
   6) Uninstall
+  7) SSL — Enable / Disable / Delete / Re-issue
   0) Exit
 ```
 
@@ -168,6 +169,56 @@ The menu header shows the installed version, so you can see at a glance which ve
 - **Uninstall (option 6)** stops the service and removes the program (and the `nokhodichat` shortcut). It asks whether to keep your messages and config.
 
 > **Menu tip:** if the menu ever prints "Invalid choice." without you typing anything, it was started from a pipe (for example, at the end of the `curl ... | bash` one-liner) instead of from your keyboard. That was fixed in v2.0.1 — the menu now reads from the real terminal and exits cleanly instead of looping. Just run `nokhodichat` from a normal SSH prompt.
+
+---
+
+## SSL / TLS — optional, from the menu
+
+SSL is off by default — plain HTTP keeps working, and nobody is forced to use HTTPS. When you turn it on, the **same port (44044) serves HTTPS instead of HTTP**. Turn it off again and you're back on plain HTTP.
+
+In the menu: `nokhodichat` → **7) SSL**, then:
+
+| SSL menu | What it does |
+|---|---|
+| **1) Enable — Self-signed** | Makes a 365-day certificate on the server, no domain needed. Works with your server IP. Browsers will show a warning ("not secure / proceed anyway") because the certificate isn't signed by a public authority — that is normal for self-signed. Click Advanced → Proceed. |
+| **2) Enable — Let's Encrypt** | Free, trusted certificate — no browser warning. Needs a **domain name that already points to this server** (DNS A record → your server IP) and port 80 reachable. The certificate renews itself automatically and the chat restarts on renewal. |
+| **3) Disable SSL** | Back to plain HTTP. The certificate files are kept, so you can turn SSL back on without making a new certificate. |
+| **4) Delete SSL certificate** | Deletes the certificate files and turns SSL off. For Let's Encrypt it also deletes the certificate from certbot. |
+| **5) Delete & get a new certificate** | Deletes the old certificate, then asks whether the new one should be self-signed or Let's Encrypt. |
+
+After enabling SSL, open the chat with **`https://`** instead of `http://`:
+
+```
+https://<server-ip>:44044          # self-signed, or with a domain:
+https://<your-domain>:44044        # Let's Encrypt
+```
+
+**Without the menu** (same thing the menu does, on the server):
+
+```bash
+# Self-signed: make the certificate with openssl, then enable it
+mkdir -p /opt/nokhodi-chat/tls
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout /opt/nokhodi-chat/tls/key.pem -out /opt/nokhodi-chat/tls/cert.pem \
+  -days 365 -subj "/CN=<server-ip>" -addext "subjectAltName=IP:<server-ip>,IP:127.0.0.1"
+/opt/nokhodi-chat/nokhodi-chat tls -enable true -mode selfsigned \
+  -cert /opt/nokhodi-chat/tls/cert.pem -key /opt/nokhodi-chat/tls/key.pem
+sudo systemctl restart nokhodi-chat
+
+# Disable again (back to plain HTTP, certificate kept):
+/opt/nokhodi-chat/nokhodi-chat tls -enable false
+sudo systemctl restart nokhodi-chat
+
+# Delete the TLS settings completely:
+/opt/nokhodi-chat/nokhodi-chat tls -clear
+sudo systemctl restart nokhodi-chat
+```
+
+**Notes:**
+- SSL is a server-wide switch, not per user — when it's on, everyone uses `https://`, when it's off, everyone uses `http://`. There is no mixed mode on the same port.
+- A self-signed certificate is still encrypted — the warning is only about *who* signed it, not about encryption.
+- Let's Encrypt certificates last 90 days and renew automatically (certbot timer). If renewal ever fails, check that the domain still points to the server and port 80 is open, then use menu option 5 to re-issue.
+- The certificate files live in `/opt/nokhodi-chat/tls/` (self-signed) or `/etc/letsencrypt/live/<domain>/` (Let's Encrypt). The `tls/` folder is not deleted by updates.
 
 ---
 
@@ -248,9 +299,16 @@ Created automatically on first run if missing. Passwords are hashes only:
   "admin_salt": "<random hex>",
   "session_days": 7,
   "data_dir": "data",
-  "title": "اتاق نخودی"
+  "title": "اتاق نخودی",
+  "tls_enabled": false,
+  "tls_mode": "",
+  "tls_domain": "",
+  "tls_cert_file": "",
+  "tls_key_file": ""
 }
 ```
+
+`tls_enabled: false` is the default (plain HTTP). When SSL is on, `tls_mode` is `"selfsigned"` or `"letsencrypt"`, and `tls_cert_file` / `tls_key_file` point at the certificate and key.
 
 ### Data — `data/`
 
@@ -325,6 +383,9 @@ go run . -config config.json
 | Problem | Fix |
 |---|---|
 | Login says the password is wrong | In v2 the login is **password only** — there is no username box. Make sure you're typing the user password (for everyone) or the OP password (for you), not the old v1 `admin` login. If you forgot it, reset it on the server with the `passwd` commands in [Passwords](#passwords). |
+| After enabling SSL, `http://` shows an error | That's expected — the same port now speaks HTTPS only. Use `https://<server-ip>:44044` instead. |
+| Browser warns about a self-signed certificate | Normal for self-signed. Click Advanced → Proceed (Chrome / Firefox). For no warning at all, use Let's Encrypt with a domain instead. |
+| Let's Encrypt fails | Check the domain's DNS A record really points to the server IP, and port 80 is open (`sudo ufw allow 80/tcp`, and nothing else is using port 80). Then try menu option 5 to re-issue. |
 | Menu prints "Invalid choice." with no typing, and flickers | The menu was started from a pipe, not from your keyboard. Fixed in v2.0.1 — update to v2.0.1, then run `nokhodichat` from a normal SSH prompt. |
 | Menu won't take a number | Check your Windows keyboard is in **EN** mode — Persian digits (`۲`) don't count as `2`. |
 | Page doesn't open | Check the service is running: `sudo systemctl status nokhodi-chat`, check the health URL above, and open the port: `sudo ufw allow 44044/tcp`. |
@@ -347,6 +408,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.1.0** — SSL / TLS from the menu: self-signed or Let's Encrypt, disable, delete, and re-issue. Same port serves HTTPS when on, HTTP when off.
 - **v2.0.1** — Menu fix: reads input from the real terminal (no more "Invalid choice." loop from a pipe), version shown in the menu header, uninstall also removes `nokhodichat`.
 - **v2.0.0** — Rooms (mIRC-style), OP / user two-password login, per-room passwords, self-destruct timers, hidden rooms via secret link, online users, kick / ban, `/join` `/list` `/me` `/help`.
 - **v1.0.2** — Renamed to اتاق نخودی, `nokhodichat` command added.

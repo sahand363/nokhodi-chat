@@ -29,12 +29,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 //go:embed web
 var webFS embed.FS
 
-var version = "2.0.1"
+var version = "2.1.0"
 
 // Config is the on-disk schema for config.json. Passwords are NEVER
 // stored in plain text — only salted SHA-256 hashes.
@@ -54,6 +55,21 @@ type Config struct {
 	SessionDays       int    `json:"session_days"`
 	DataDir           string `json:"data_dir"`
 	Title             string `json:"title"`
+	// v2.1: optional SSL/TLS. Off by default — plain HTTP keeps working.
+	// When on, the same port serves HTTPS instead of HTTP.
+	TLSEnabled  bool   `json:"tls_enabled"`
+	TLSMode     string `json:"tls_mode,omitempty"` // "selfsigned" or "letsencrypt"
+	TLSDomain   string `json:"tls_domain,omitempty"`
+	TLSCertFile string `json:"tls_cert_file,omitempty"`
+	TLSKeyFile  string `json:"tls_key_file,omitempty"`
+}
+
+// scheme returns "https" when TLS is on, "http" otherwise.
+func (c *Config) scheme() string {
+	if c.TLSEnabled {
+		return "https"
+	}
+	return "http"
 }
 
 func defaultConfig() Config {
@@ -206,6 +222,8 @@ func main() {
 	// Small CLI helpers used by manage.sh, e.g.:
 	//   ./nokhodi-chat passwd -role op -pass 'new-op-secret'
 	//   ./nokhodi-chat passwd -role user -pass 'new-user-secret'
+	//   ./nokhodi-chat tls -enable true -mode selfsigned -cert tls/cert.pem -key tls/key.pem
+	//   ./nokhodi-chat tls -enable false   (back to plain HTTP, cert files untouched)
 	if len(flag.Args()) > 0 {
 		switch flag.Arg(0) {
 		case "version":
@@ -213,6 +231,11 @@ func main() {
 			return
 		case "passwd":
 			if err := runPasswd(*configPath); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "tls":
+			if err := runTLS(*configPath); err != nil {
 				log.Fatal(err)
 			}
 			return
@@ -229,6 +252,17 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	if cfg.TLSEnabled {
+		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
+			log.Fatalf("TLS is enabled in %s but tls_cert_file / tls_key_file is missing — disable it with: nokhodi-chat tls -enable false", *configPath)
+		}
+		log.Printf("اتاق نخودی — nokhodi-chat %s listening on https://%s (TLS %s)", version, addr, cfg.TLSMode)
+		log.Printf("open https://<server-ip>:%d  (self-signed certs show a browser warning — that is normal)", cfg.Port)
+		if err := http.ListenAndServeTLS(addr, cfg.TLSCertFile, cfg.TLSKeyFile, srv.routes()); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	log.Printf("اتاق نخودی — nokhodi-chat %s listening on http://%s", version, addr)
 	log.Printf("open http://<server-ip>:%d  (user changeme123 / OP changeme-op123 by default — change both!)", cfg.Port)
 	if err := http.ListenAndServe(addr, srv.routes()); err != nil {
@@ -263,5 +297,90 @@ func runPasswd(configPath string) error {
 		return err
 	}
 	fmt.Printf("%s password updated in %s (stored as salted hash only)\n", *role, *cfgPath)
+	return nil
+}
+
+// runTLS implements `./nokhodi-chat tls ...` — how manage.sh turns SSL
+// on/off and points the server at a certificate, without hand-editing
+// config.json.
+//
+// Enable (self-signed):
+//
+//	nokhodi-chat tls -enable true -mode selfsigned -cert tls/cert.pem -key tls/key.pem [-domain example.com]
+//
+// Enable (Let's Encrypt):
+//
+//	nokhodi-chat tls -enable true -mode letsencrypt -domain example.com \
+//	  -cert /etc/letsencrypt/live/example.com/fullchain.pem \
+//	  -key /etc/letsencrypt/live/example.com/privkey.pem
+//
+// Disable (back to plain HTTP; the cert files are left on disk):
+//
+//	nokhodi-chat tls -enable false
+//
+// Clear everything (delete the TLS settings from config.json):
+//
+//	nokhodi-chat tls -clear
+func runTLS(configPath string) error {
+	fs := flag.NewFlagSet("tls", flag.ExitOnError)
+	// String, not Bool: Go's flag package does not accept `-enable true`
+	// (a bool flag takes its value only as `-enable=true`), and every
+	// caller — manage.sh, README, and the user — writes `-enable true`.
+	enableStr := fs.String("enable", "", "true to enable TLS, false to disable it")
+	clear := fs.Bool("clear", false, "remove all TLS settings from config.json")
+	mode := fs.String("mode", "", "selfsigned or letsencrypt")
+	domain := fs.String("domain", "", "domain name for the certificate (Let's Encrypt, or SAN on a self-signed cert)")
+	cert := fs.String("cert", "", "path to the certificate file")
+	key := fs.String("key", "", "path to the private key file")
+	cfgPath := fs.String("config", configPath, "path to config.json")
+	_ = fs.Parse(os.Args[2:])
+
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if *clear {
+		cfg.TLSEnabled, cfg.TLSMode, cfg.TLSDomain, cfg.TLSCertFile, cfg.TLSKeyFile = false, "", "", "", ""
+		if err := saveConfig(*cfgPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("TLS settings cleared from %s (plain HTTP)\n", *cfgPath)
+		return nil
+	}
+	enable := false
+	if *enableStr != "" {
+		v, err := strconv.ParseBool(*enableStr)
+		if err != nil {
+			return fmt.Errorf("usage: nokhodi-chat tls -enable true|false [-mode selfsigned|letsencrypt -cert <file> -key <file>]")
+		}
+		enable = v
+	} else if !*clear {
+		return fmt.Errorf("usage: nokhodi-chat tls -enable true|false [-mode selfsigned|letsencrypt -cert <file> -key <file>] or -clear")
+	}
+	if !enable {
+		cfg.TLSEnabled = false
+		if err := saveConfig(*cfgPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("TLS disabled in %s (plain HTTP — certificate files were left on disk)\n", *cfgPath)
+		return nil
+	}
+	if *mode != "selfsigned" && *mode != "letsencrypt" {
+		return fmt.Errorf("usage: nokhodi-chat tls -enable true -mode selfsigned|letsencrypt -cert <file> -key <file> [-domain <name>]")
+	}
+	if *cert == "" || *key == "" {
+		return fmt.Errorf("a certificate and a key file are required: -cert <file> -key <file>")
+	}
+	if _, err := os.Stat(*cert); err != nil {
+		return fmt.Errorf("certificate file not found: %s", *cert)
+	}
+	if _, err := os.Stat(*key); err != nil {
+		return fmt.Errorf("key file not found: %s", *key)
+	}
+	cfg.TLSEnabled, cfg.TLSMode, cfg.TLSDomain, cfg.TLSCertFile, cfg.TLSKeyFile = true, *mode, *domain, *cert, *key
+	if err := saveConfig(*cfgPath, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("TLS enabled in %s (mode %s, domain %q) — restart the service to use https\n", *cfgPath, *mode, *domain)
 	return nil
 }

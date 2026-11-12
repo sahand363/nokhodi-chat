@@ -108,6 +108,8 @@ func (s *Server) routes() http.Handler {
 			"status": "ok", "title": s.cfg.Title, "version": version,
 			"messages": s.store.TotalCount(), "rooms": len(s.rooms.All()),
 			"online": s.broker.Count(""),
+			"tls":    s.cfg.TLSEnabled, "tls_mode": s.cfg.TLSMode,
+			"url": fmt.Sprintf("%s://<server-ip>:%d", s.cfg.scheme(), s.cfg.Port),
 		})
 	})
 	mux.HandleFunc("/api/captcha", s.handleCaptcha)
