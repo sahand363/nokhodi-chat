@@ -173,6 +173,61 @@ func TestTLSConfigDefaultsOff(t *testing.T) {
 	}
 }
 
+func TestUploadValidation(t *testing.T) {
+	// Images, including GIFs, are allowed.
+	if _, _, isImage, err := validateUpload("cat.gif", 1000, 10); err != nil || !isImage {
+		t.Fatalf("gif should be allowed as image, err=%v", err)
+	}
+	if _, _, isImage, err := validateUpload("photo.PNG", 1000, 10); err != nil || !isImage {
+		t.Fatalf("png should be allowed as image, err=%v", err)
+	}
+	// Ordinary files are allowed, executables are not.
+	if _, _, isImage, err := validateUpload("notes.pdf", 1000, 10); err != nil || isImage {
+		t.Fatalf("pdf should be allowed as a file, err=%v", err)
+	}
+	if _, _, _, err := validateUpload("virus.exe", 1000, 10); err == nil {
+		t.Fatal("exe must be rejected")
+	}
+	if _, _, _, err := validateUpload("page.html", 1000, 10); err == nil {
+		t.Fatal("html must be rejected")
+	}
+	if _, _, _, err := validateUpload("script.js", 1000, 10); err == nil {
+		t.Fatal("js must be rejected")
+	}
+	// Size limit: 10 MB per file by default.
+	if _, _, _, err := validateUpload("big.png", 11*1024*1024, 10); err == nil {
+		t.Fatal("file over the size limit must be rejected")
+	}
+	if _, _, _, err := validateUpload("empty.png", 0, 10); err == nil {
+		t.Fatal("empty file must be rejected")
+	}
+}
+
+func TestUploadQuotaStats(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir, []string{"general"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	att := &Attachment{ID: "abc123", FileName: "a.png", Size: 1024, Mime: "image/png", IsImage: true, Ext: ".png", URL: "/api/uploads/general/abc123.png"}
+	if _, err := s.AddAttachment("general", "سارا", "", TTLNever, att); err != nil {
+		t.Fatal(err)
+	}
+	count, bytes24h, total := s.AttachmentStats("سارا")
+	if count != 1 || bytes24h != 1024 || total != 1024 {
+		t.Fatalf("stats = %d, %d, %d — want 1, 1024, 1024", count, bytes24h, total)
+	}
+	// Deleting the message frees the quota.
+	msgs := s.Last("general", 10)
+	if !s.Delete("general", msgs[0].ID) {
+		t.Fatal("delete failed")
+	}
+	count, _, total = s.AttachmentStats("سارا")
+	if count != 0 || total != 0 {
+		t.Fatalf("after delete stats = %d, %d — want 0, 0", count, total)
+	}
+}
+
 func TestCaptchaVerifyOnce(t *testing.T) {
 	c := NewCaptchaStore()
 	id, q, err := c.New()

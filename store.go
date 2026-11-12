@@ -8,17 +8,31 @@ import (
 	"time"
 )
 
+// Attachment is one uploaded image or file attached to a message.
+// The file itself lives on disk at data/uploads/<roomID>/<id>.<ext>;
+// only the metadata is stored in the message JSON.
+type Attachment struct {
+	ID       string `json:"id"`            // random hex, no extension
+	FileName string `json:"file_name"`     // original name, as uploaded
+	Size     int64  `json:"size"`          // bytes
+	Mime     string `json:"mime"`          // e.g. image/png, application/pdf
+	IsImage  bool   `json:"is_image"`      // true for jpg/png/webp/gif — shown big in chat
+	URL      string `json:"url"`           // /api/uploads/<roomID>/<id>.<ext>
+	Ext      string `json:"ext,omitempty"` // ".png" — kept so the server can find the file
+}
+
 // Message is one chat line in one room. Stored per room in
 // data/room_<id>.json so history survives restarts and new joiners
 // can read everything before them (until it self-destructs).
 type Message struct {
-	ID        int64      `json:"id"`
-	RoomID    string     `json:"room_id,omitempty"`
-	Name      string     `json:"name"`
-	Text      string     `json:"text"`
-	CreatedAt time.Time  `json:"created_at"`
-	Unix      int64      `json:"unix"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	ID         int64       `json:"id"`
+	RoomID     string      `json:"room_id,omitempty"`
+	Name       string      `json:"name"`
+	Text       string      `json:"text"`
+	CreatedAt  time.Time   `json:"created_at"`
+	Unix       int64       `json:"unix"`
+	ExpiresAt  *time.Time  `json:"expires_at,omitempty"`
+	Attachment *Attachment `json:"attachment,omitempty"`
 }
 
 func (m *Message) Expired(now time.Time) bool {
@@ -91,15 +105,34 @@ func (s *Store) loadRoom(roomID string) error {
 	now := time.Now()
 	kept := []Message{}
 	for _, m := range msgs {
-		if !m.Expired(now) {
-			kept = append(kept, m)
+		if m.Expired(now) {
+			s.deleteAttachmentFile(roomID, m)
+			continue
 		}
+		kept = append(kept, m)
 		if m.ID >= s.nextID[roomID] {
 			s.nextID[roomID] = m.ID + 1
 		}
 	}
 	s.messages[roomID] = kept
 	return nil
+}
+
+// attachmentPath is where an attachment's file lives on disk.
+func (s *Store) attachmentPath(roomID string, att *Attachment) string {
+	if att == nil {
+		return ""
+	}
+	return filepath.Join(s.dataDir, "uploads", roomID, att.ID+att.Ext)
+}
+
+// deleteAttachmentFile removes an attachment's file, if it exists.
+// Called when its message is deleted, expires, or its room is deleted.
+func (s *Store) deleteAttachmentFile(roomID string, m Message) {
+	if m.Attachment == nil {
+		return
+	}
+	_ = os.Remove(s.attachmentPath(roomID, m.Attachment))
 }
 
 // EnsureRoom loads a room's file when a new room is created at runtime.
@@ -112,20 +145,30 @@ func (s *Store) EnsureRoom(roomID string) error {
 func (s *Store) DeleteRoom(roomID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, m := range s.messages[roomID] {
+		s.deleteAttachmentFile(roomID, m)
+	}
 	delete(s.messages, roomID)
 	delete(s.nextID, roomID)
 	_ = os.Remove(s.roomPath(roomID))
+	_ = os.RemoveAll(filepath.Join(s.dataDir, "uploads", roomID))
 }
 
 // Add validates, appends and persists a message. ttlSeconds 0 = never.
 func (s *Store) Add(roomID, name, text string, ttlSeconds int64) (Message, error) {
+	return s.AddAttachment(roomID, name, text, ttlSeconds, nil)
+}
+
+// AddAttachment is Add, with an optional uploaded file attached.
+// If the save fails, the caller must remove the uploaded file itself.
+func (s *Store) AddAttachment(roomID, name, text string, ttlSeconds int64, att *Attachment) (Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.loadRoom(roomID); err != nil {
 		return Message{}, err
 	}
 	now := time.Now()
-	m := Message{ID: s.nextID[roomID], RoomID: roomID, Name: name, Text: text, CreatedAt: now, Unix: now.Unix()}
+	m := Message{ID: s.nextID[roomID], RoomID: roomID, Name: name, Text: text, CreatedAt: now, Unix: now.Unix(), Attachment: att}
 	s.nextID[roomID]++
 	if ttlSeconds > 0 {
 		exp := now.Add(time.Duration(ttlSeconds) * time.Second)
@@ -138,6 +181,28 @@ func (s *Store) Add(roomID, name, text string, ttlSeconds int64) (Message, error
 		return Message{}, err
 	}
 	return m, nil
+}
+
+// AttachmentStats counts one user's uploads: how many files and how
+// many bytes in the last 24 hours, and how many bytes they have
+// stored in total right now. Used for the per-user upload limits.
+func (s *Store) AttachmentStats(name string) (count24h int, bytes24h, totalBytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	since := time.Now().Add(-24 * time.Hour)
+	for _, msgs := range s.messages {
+		for _, m := range msgs {
+			if m.Attachment == nil || m.Name != name {
+				continue
+			}
+			totalBytes += m.Attachment.Size
+			if m.CreatedAt.After(since) {
+				count24h++
+				bytes24h += m.Attachment.Size
+			}
+		}
+	}
+	return count24h, bytes24h, totalBytes
 }
 
 // Last returns up to n most recent, non-expired messages, oldest first.
@@ -157,12 +222,14 @@ func (s *Store) Last(roomID string, n int) []Message {
 }
 
 // Delete removes one message. Returns true if it existed.
+// Its attached file, if any, is deleted from disk too.
 func (s *Store) Delete(roomID string, id int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	msgs := s.messages[roomID]
 	for i, m := range msgs {
 		if m.ID == id {
+			s.deleteAttachmentFile(roomID, m)
 			s.messages[roomID] = append(msgs[:i], msgs[i+1:]...)
 			_ = s.saveLocked(roomID)
 			return true
@@ -220,9 +287,12 @@ func (s *Store) pruneLocked(roomID string) []Message {
 	msgs := s.messages[roomID]
 	kept := msgs[:0]
 	for _, m := range msgs {
-		if !m.Expired(now) {
-			kept = append(kept, m)
+		if m.Expired(now) {
+			// Self-destructed: its file goes with it.
+			s.deleteAttachmentFile(roomID, m)
+			continue
 		}
+		kept = append(kept, m)
 	}
 	s.messages[roomID] = kept
 	return kept

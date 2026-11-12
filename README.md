@@ -89,6 +89,21 @@ The room list is on the side of the screen (tap ☰ on a phone to open it).
 - Click 🗑 on a message to delete it — your own messages, or **any** message if you're the OP.
 - The header of each room tells you its self-destruct setting, e.g. "پیام‌ها بعد از ۲۴ ساعت پاک می‌شوند".
 
+### Sending images and files
+
+Click the **📎** button next to the message box (or write a caption first, then click 📎 — the caption is sent with the file).
+
+- **Images** (JPG, PNG, WebP, **GIF** — animated GIFs play) are shown **big in the chat** (up to 320 px wide). Click an image to open it full-size in a new tab.
+- **Other files** (PDF, TXT, MD, CSV, ZIP, MP3, MP4, Word / Excel / PowerPoint) show as a **download card** with the file name and size — click it to download.
+- **Limits, per user:**
+  - **10 MB** maximum per file
+  - **20 files** per user per day
+  - **100 MB** per user per day in total
+  - **200 MB** stored per user at once — freed when a message expires or is deleted
+- Executables and scripts (`.exe`, `.js`, `.html`, …) are rejected.
+- Only people who have joined that room can download its files — hidden rooms' files stay hidden the same way. A file is deleted from disk when its message is deleted, expires, or its room is deleted.
+- To change the limits, edit `config.json` (`max_upload_mb`, `max_uploads_per_user_per_day`, `max_upload_bytes_per_user_per_day`, `max_upload_bytes_per_user_total`) and restart the service.
+
 ---
 
 ## Rooms — mIRC-style, with one OP
@@ -316,6 +331,7 @@ Created automatically on first run if missing. Passwords are hashes only:
 |---|---|
 | `data/rooms.json` | The room list (name, hidden, TTL, room-password hash, invite token) |
 | `data/room_<id>.json` | One file per room with that room's message history |
+| `data/uploads/<roomID>/` | Uploaded image and file contents, one random-named file per upload |
 | `data/sessions.json` | Logins (role + display name + unlocked rooms), 7 days |
 | `data/bans.json` | Display names the OP has banned |
 
@@ -340,6 +356,8 @@ Update never deletes `config.json` or `data/`. Upgrading from v1 moves the old `
 | `/api/rooms/{id}/join` | POST | Session | Enter a room `{password, invite}` |
 | `/api/rooms/{id}/messages` | GET / POST | Joined | Room history / send a message |
 | `/api/rooms/{id}/messages/{mid}` | DELETE | Own message, or OP | Delete a message |
+| `/api/rooms/{id}/upload` | POST | Joined | Upload a file (multipart, field `file`, optional `text` caption) — returns the message with its attachment |
+| `/api/uploads/{roomID}/{fileID.ext}` | GET | Joined that room | Download / view a file — images are shown inline, other files download |
 | `/api/rooms/{id}/events` | GET | Joined | SSE live feed for that room |
 | `/api/rooms/{id}/online` | GET | Joined | Who is online in the room |
 | `/api/admin/passwords` | POST | OP | Change the OP or user password |
@@ -408,6 +426,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.2.0** — Images and files in chat: 📎 upload button, images (incl. animated GIFs) shown big, other files as download cards, per-user limits (10 MB per file, 20 files / 100 MB per day, 200 MB stored), files deleted with their message.
 - **v2.1.0** — SSL / TLS from the menu: self-signed or Let's Encrypt, disable, delete, and re-issue. Same port serves HTTPS when on, HTTP when off.
 - **v2.0.1** — Menu fix: reads input from the real terminal (no more "Invalid choice." loop from a pipe), version shown in the menu header, uninstall also removes `nokhodichat`.
 - **v2.0.0** — Rooms (mIRC-style), OP / user two-password login, per-room passwords, self-destruct timers, hidden rooms via secret link, online users, kick / ban, `/join` `/list` `/me` `/help`.

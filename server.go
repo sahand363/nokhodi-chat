@@ -119,6 +119,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/rooms", s.handleRooms)
 	mux.HandleFunc("/api/rooms/", s.handleRoomSub)
+	mux.HandleFunc("/api/uploads/", s.handleUploadDownload)
 	mux.HandleFunc("/api/admin/passwords", s.handleAdminPasswords)
 	mux.HandleFunc("/api/admin/ban", s.handleAdminBan)
 	mux.HandleFunc("/api/admin/unban", s.handleAdminUnban)
@@ -378,6 +379,8 @@ func (s *Server) handleRoomSub(w http.ResponseWriter, r *http.Request) {
 		s.handleRoom(w, r, id)
 	case "join":
 		s.handleRoomJoin(w, r, id)
+	case "upload":
+		s.handleRoomUpload(w, r, id)
 	case "messages":
 		if len(parts) > 2 {
 			mid, err := strconv.ParseInt(parts[2], 10, 64)

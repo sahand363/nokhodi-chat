@@ -235,7 +235,29 @@
     nameEl.textContent = m.name;
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = m.text;
+    if (m.text) bubble.textContent = m.text;
+    // Uploads: images (jpg/png/webp/gif — GIFs play animated) are shown
+    // big in the chat; other files show as a download card.
+    if (m.attachment) {
+      const a = m.attachment;
+      if (a.is_image) {
+        wrap.classList.add("has-image");
+        const img = document.createElement("img");
+        img.className = "chat-img";
+        img.src = a.url;
+        img.alt = a.file_name;
+        img.loading = "lazy";
+        img.addEventListener("click", () => window.open(a.url, "_blank"));
+        bubble.appendChild(img);
+      } else {
+        const card = document.createElement("a");
+        card.className = "file-card";
+        card.href = a.url;
+        card.download = a.file_name;
+        card.textContent = "📄 " + a.file_name + " — " + fmtSize(a.size);
+        bubble.appendChild(card);
+      }
+    }
     const timeEl = document.createElement("span");
     timeEl.className = "time";
     timeEl.textContent = faTime(m.unix);
@@ -321,7 +343,7 @@
     if (!text || !currentRoom) return;
     // /commands
     if (text === "/help") {
-      alert("/join #name — ورود به اتاق\n/list — دیدن اتاق‌ها\n/me کار — * شما کار می‌کنید");
+      alert("/join #name — ورود به اتاق\n/list — دیدن اتاق‌ها\n/me کار — * شما کار می‌کنید\n📎 — ارسال عکس یا فایل (حداکثر ۱۰ مگابایت، ۲۰ فایل در روز)");
       input.value = "";
       return;
     }
@@ -355,6 +377,36 @@
   $("send-btn").addEventListener("click", sendMessage);
   $("message-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); sendMessage(); }
+  });
+
+  // --- Uploads: images and files (max 10 MB per file) ---
+  function fmtSize(n) {
+    if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+    if (n >= 1024) return Math.round(n / 1024) + " KB";
+    return n + " B";
+  }
+  $("upload-btn").addEventListener("click", () => $("file-input").click());
+  $("file-input").addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file || !currentRoom) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert("فایل خیلی بزرگ است — حداکثر ۱۰ مگابایت برای هر فایل");
+      return;
+    }
+    const caption = $("message-input").value.trim();
+    const form = new FormData();
+    form.append("file", file);
+    if (caption) form.append("text", caption);
+    try {
+      const res = await fetch("/api/rooms/" + encodeURIComponent(currentRoom.id) + "/upload", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "خطا در ارسال فایل");
+      $("message-input").value = "";
+      addMessage(data);
+    } catch (err) {
+      alert(err.message);
+    }
   });
 
   $("emoji-btn").addEventListener("click", () => {

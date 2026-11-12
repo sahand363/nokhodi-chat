@@ -35,7 +35,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-var version = "2.1.0"
+var version = "2.2.0"
 
 // Config is the on-disk schema for config.json. Passwords are NEVER
 // stored in plain text — only salted SHA-256 hashes.
@@ -62,6 +62,16 @@ type Config struct {
 	TLSDomain   string `json:"tls_domain,omitempty"`
 	TLSCertFile string `json:"tls_cert_file,omitempty"`
 	TLSKeyFile  string `json:"tls_key_file,omitempty"`
+	// v2.2: uploads — images and files, with per-user limits.
+	// MaxUploadMB is the largest single file (MB). Per user, per day:
+	// at most MaxUploadsPerUserPerDay files and MaxUploadBytesPerUserPerDay
+	// bytes in total; MaxUploadBytesPerUserTotal is the most a user may
+	// have stored on disk at once (older files are freed when their
+	// messages expire or are deleted).
+	MaxUploadMB                 int   `json:"max_upload_mb"`
+	MaxUploadsPerUserPerDay     int   `json:"max_uploads_per_user_per_day"`
+	MaxUploadBytesPerUserPerDay int64 `json:"max_upload_bytes_per_user_per_day"`
+	MaxUploadBytesPerUserTotal  int64 `json:"max_upload_bytes_per_user_total"`
 }
 
 // scheme returns "https" when TLS is on, "http" otherwise.
@@ -79,6 +89,12 @@ func defaultConfig() Config {
 		SessionDays: 7,
 		DataDir:     "data",
 		Title:       "اتاق نخودی",
+		// Upload limits (v2.2): 10 MB per file, 20 files / 100 MB per
+		// user per day, 200 MB stored per user at once.
+		MaxUploadMB:                 10,
+		MaxUploadsPerUserPerDay:     20,
+		MaxUploadBytesPerUserPerDay: 100 * 1024 * 1024,
+		MaxUploadBytesPerUserTotal:  200 * 1024 * 1024,
 	}
 }
 
@@ -197,6 +213,19 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if cfg.Title == "" {
 		cfg.Title = "اتاق نخودی"
+	}
+	// Upload limits: 0 in an old config means "not set yet" — fill defaults.
+	if cfg.MaxUploadMB <= 0 {
+		cfg.MaxUploadMB = 10
+	}
+	if cfg.MaxUploadsPerUserPerDay <= 0 {
+		cfg.MaxUploadsPerUserPerDay = 20
+	}
+	if cfg.MaxUploadBytesPerUserPerDay <= 0 {
+		cfg.MaxUploadBytesPerUserPerDay = 100 * 1024 * 1024
+	}
+	if cfg.MaxUploadBytesPerUserTotal <= 0 {
+		cfg.MaxUploadBytesPerUserTotal = 200 * 1024 * 1024
 	}
 	return &cfg, nil
 }
