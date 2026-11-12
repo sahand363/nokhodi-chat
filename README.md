@@ -1,19 +1,227 @@
-# 🫛 اتاق نخودی — Self-Hosted Chat (v2)
+# 🫛 اتاق نخودی — Self-Hosted Chat
 
-A complete, modern, self-hosted web chat in **Go (standard library only — no external dependencies)**, built for an Ubuntu server. Mobile-first Persian RTL UI (Vazirmatn), real-time messages over SSE, persistent JSON storage, and a clean CLI management menu.
+A complete, modern, self-hosted web chat in **Go (standard library only — no external dependencies)**, built for an Ubuntu server.
 
-## v2 — mIRC-style rooms, with one OP
+Mobile-first Persian RTL interface (Vazirmatn), real-time messages over SSE, persistent JSON storage, mIRC-style rooms, one OP in charge, and a clean CLI management menu. No database server, no compilation on the server — the binary comes pre-built from GitHub Actions.
 
-- **Rooms:** `#general` by default, plus rooms the OP creates — `#music`, `#games`, …
-- **Two entry passwords:** an **OP password** (only Mark) and a **user password** (everyone else). The password you log in with decides your role. Login is password-only, then your display name + maths captcha.
-- **Only the OP can:** create / delete / rename rooms, set or change a room password, set a room's self-destruct timer, delete any message, kick / ban a name, and change the OP and user passwords (in the app's 👑 OP panel, or in the `nokhodichat` menu).
-- **Room passwords:** a room can be open, or locked with its own password.
-- **Hidden rooms:** the OP can hide a room from the list. A hidden room is only reachable via its secret link (`/?room=<id>&invite=<token>`), it still needs the room password, and the server returns **404 — no name, no messages, no members — to anyone without link + password**. The OP sees hidden rooms with a 👁‍🗨 badge and can copy the secret link from the OP panel.
-- **Self-destruct:** each room has a timer — never, 10 minutes, 1 hour, 24 hours, or 7 days. Expired messages are deleted by the server for everyone, every 30 seconds.
-- **Online users:** who is in the current room, live. The OP can ban a name from there.
-- **Commands:** `/join #name`, `/list`, `/me does something`, `/help`. Edit/delete is via the 🗑 button (your own messages, or any message if you're OP).
+![اتاق نخودی — rooms on the right, OP panel, locked room Varzeshkaran](docs/screenshot.png)
 
-## What you get
+> Screenshot: the chat running live — `#general` and a locked room `#Varzeshkaran`, with the 👑 OP panel and the online list. The room list is on the side (☰ on mobile).
+
+---
+
+## Quick install — one line
+
+On a fresh Ubuntu server, as root (or with `sudo`):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
+```
+
+That's it. The installer:
+
+1. Downloads the pre-built `linux/amd64` binary from the latest GitHub release
+2. Installs it to `/opt/nokhodi-chat`, creates `config.json` + `data/`
+3. Installs and starts the systemd service on port **44044**
+4. Installs the `nokhodichat` command (`/usr/local/bin/nokhodichat`) to open the menu
+5. Opens the management menu so you can set the OP and user passwords
+
+Then open:
+
+```
+http://<server-ip>:44044
+```
+
+If the page doesn't load, open the port:
+
+```bash
+sudo ufw allow 44044/tcp
+```
+
+**Requirements:** Ubuntu (or any Linux with systemd), an open port 44044, and internet access for the one-time download. You do **not** need Go, Node, or a database on the server.
+
+---
+
+## How it works
+
+### 1. Log in — two passwords, two roles
+
+The login page asks for **one password only** — no username.
+
+| Password | Who | What you get |
+|---|---|---|
+| **OP password** | Only you, the server owner | 👑 OP badge, the OP panel, and full control |
+| **User password** | Everyone else | Just chat — join rooms and send messages |
+
+The password you type decides your role. The server stores both passwords only as salted SHA-256 hashes, never in plain text.
+
+**Defaults on a fresh install — change both at once:**
+
+| Role | Default password |
+|---|---|
+| User (everyone) | `changeme123` |
+| OP (only you) | `changeme-op123` |
+
+Change them in the menu (`nokhodichat` → options **3** and **4**), in the 👑 OP panel inside the chat, or from the command line (see [Passwords](#passwords) below). If you are upgrading from v1, your old password stays as the user password, and the OP password starts as `changeme-op123` — change that first.
+
+### 2. Pick your name + solve a captcha
+
+After the password, each person picks their **own display name** and solves a simple maths captcha (addition / subtraction, e.g. `7 + 5 = ؟`).
+
+- Display names must be unique while someone is online — two people can't impersonate each other.
+- Your login stays remembered on that browser for **7 days** (session cookie, persisted in `data/sessions.json`). Your display name is remembered too.
+
+### 3. Chat in rooms
+
+The room list is on the side of the screen (tap ☰ on a phone to open it).
+
+- **`#general`** is there by default. Your old v1 messages live there after an upgrade.
+- Click a room to join it. Each room has its own history and its own live feed.
+- Send messages, use the 😊 emoji picker, and use commands in the message box:
+
+| Command | What it does |
+|---|---|
+| `/join #music` | Jump to a room by name |
+| `/list` | Refresh the room list |
+| `/me waves` | Sends `* YourName waves` |
+| `/help` | Shows the commands |
+
+- Click 🗑 on a message to delete it — your own messages, or **any** message if you're the OP.
+- The header of each room tells you its self-destruct setting, e.g. "پیام‌ها بعد از ۲۴ ساعت پاک می‌شوند".
+
+---
+
+## Rooms — mIRC-style, with one OP
+
+Only the OP can create, edit, or delete rooms. Regular users just join and chat. There are no per-room owners, no voting — it's your server.
+
+### Creating a room (OP only)
+
+In the chat, click **👑 پنل OP** (OP panel) → *ساخت اتاق جدید* (Create a room), and set:
+
+| Setting | Meaning |
+|---|---|
+| **Name** | e.g. `music` → the room becomes `#music` |
+| **Room password** | Optional. Empty = open room, anyone who is logged in can join. Set one = locked 🔒, joining asks for that room's password |
+| **Hidden** | Tick this to hide the room from the list (see below) |
+| **Self-destruct** | Never, 10 minutes, 1 hour, 24 hours, or 7 days |
+
+The OP can also edit a room later (change its password, hide/unhide it, change its timer), or delete it. `#general` can't be deleted.
+
+### Hidden rooms — secret link + room password
+
+A hidden room is **not** in the room list for normal users.
+
+- The OP copies its **secret link** from the OP panel. It looks like:
+  ```
+  http://<server-ip>:44044/?room=<id>&invite=<secret-token>
+  ```
+- Share that link privately. Opening it still asks for the **room password** — the link alone is not enough.
+- Without the link *and* the password, the server returns **404** — no room name, no messages, no member list. Nothing leaks.
+- The OP sees hidden rooms in the list with a 👁‍🗨 badge, and can copy the link again any time.
+
+### Self-destructing messages
+
+Each room has its own timer. The timer starts when a message is **sent**.
+
+- The server deletes expired messages for everyone, every 30 seconds, and tells the room's open tabs to reload.
+- Changing a room's timer only affects messages sent after the change — old messages keep their original expiry.
+
+### Online users, kick / ban (OP only)
+
+Under the room list you can see **who is online in the current room**.
+
+- The OP can **ban a display name** from the online list or from the OP panel. That person is logged out immediately and can't pick that name again until the OP unbans them.
+- The OP can delete any message from the 🗑 button on it.
+
+---
+
+## Management menu — `nokhodichat`
+
+Type this in any SSH session to open the menu:
+
+```bash
+nokhodichat
+```
+
+(Or `sudo /opt/nokhodi-chat/manage.sh` if the shortcut isn't installed yet.)
+
+The menu header shows the installed version, so you can see at a glance which version you're running:
+
+```
+🫛  اتاق نخودی — Management
+  URL: http://<server-ip>:44044
+  Dir: /opt/nokhodi-chat
+  Version: nokhodi-chat 2.0.1
+
+  1) Install / Start Service
+  2) Update (latest release — keeps messages, rooms & config)
+  3) Set User Password (everyone else)
+  4) Set OP Password (only you — the admin)
+  5) Status
+  6) Uninstall
+  0) Exit
+```
+
+- **Update (option 2)** downloads the latest release and restarts the service. It keeps `config.json`, `data/rooms.json`, and every room's messages — nothing is wiped.
+- **Status (option 5)** shows the version, the URL, and how many messages and rooms you have.
+- **Uninstall (option 6)** stops the service and removes the program (and the `nokhodichat` shortcut). It asks whether to keep your messages and config.
+
+> **Menu tip:** if the menu ever prints "Invalid choice." without you typing anything, it was started from a pipe (for example, at the end of the `curl ... | bash` one-liner) instead of from your keyboard. That was fixed in v2.0.1 — the menu now reads from the real terminal and exits cleanly instead of looping. Just run `nokhodichat` from a normal SSH prompt.
+
+---
+
+## Passwords
+
+Change them in the menu (options 3 and 4), in the 👑 OP panel, or directly on the server — never share them in chat:
+
+```bash
+/opt/nokhodi-chat/nokhodi-chat passwd -role user -pass 'new-user-password'
+/opt/nokhodi-chat/nokhodi-chat passwd -role op -pass 'new-op-password'
+sudo systemctl restart nokhodi-chat
+```
+
+Passwords must be at least 6 characters. They are re-hashed with a fresh salt and written only as a hash to `config.json`.
+
+---
+
+## Update, uninstall, and check the version
+
+**Update to the latest release (one line):**
+
+```bash
+curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
+```
+
+Or, in the menu: `nokhodichat` → **2) Update**.
+
+**Check which version is running:**
+
+```bash
+/opt/nokhodi-chat/nokhodi-chat version
+curl -s http://127.0.0.1:44044/health
+```
+
+A healthy server answers something like:
+
+```json
+{"messages": 12, "online": 2, "rooms": 3, "status": "ok", "title": "اتاق نخودی", "version": "2.0.1"}
+```
+
+**Uninstall completely (no menu needed):**
+
+```bash
+sudo systemctl stop nokhodi-chat; sudo systemctl disable nokhodi-chat
+sudo rm -f /etc/systemd/system/nokhodi-chat.service /usr/local/bin/nokhodichat
+sudo systemctl daemon-reload
+sudo rm -rf /opt/nokhodi-chat
+```
+
+That removes everything, including messages and config. If you want to keep them, back up `/opt/nokhodi-chat/config.json` and `/opt/nokhodi-chat/data/` first, or use menu option 6 and answer "Y" to keeping them.
+
+---
+
+## What you get in this repo
 
 | Piece | File |
 |---|---|
@@ -22,77 +230,13 @@ A complete, modern, self-hosted web chat in **Go (standard library only — no e
 | Management menu | `manage.sh` (`nokhodichat` in SSH) |
 | One-line installer | `install.sh` |
 | systemd service | `nokhodi-chat.service` |
+| Screenshot used above | `docs/screenshot.png` |
 | CI/CD (builds the binary on GitHub) | `.github/workflows/release.yml` |
 | Config schema | `config.example.json` |
 
-## 1. Publish it (once)
+### Config — `config.json`
 
-```bash
-git add . && git commit -m "nokhodi chat v2" && git push origin main
-git tag v2.0.0
-git push origin v2.0.0
-# Check Actions → a Release appears with nokhodi-chat-linux-amd64.tar.gz
-```
-
-## 2. Install / update on Ubuntu (one line)
-
-```bash
-curl -sSL https://raw.githubusercontent.com/sahand363/nokhodi-chat/main/install.sh | sudo bash
-```
-
-It downloads the pre-built binary, installs it to `/opt/nokhodi-chat`, creates the systemd service, installs the `nokhodichat` command, starts it, and opens the menu.
-
-Then open: **http://&lt;server-ip&gt;:44044**
-
-> If port 44044 is blocked: `sudo ufw allow 44044/tcp`
-
-For later updates, just type `nokhodichat` and choose **2) Update** — it keeps `config.json`, `data/rooms.json` and all room messages.
-
-## 3. Management menu
-
-```bash
-nokhodichat
-```
-
-```
-🫛  اتاق نخودی — Management
-  URL: http://<server-ip>:44044
-  Dir: /opt/nokhodi-chat
-  Version: nokhodi-chat 2.0.1
-
-1) Install / Start Service
-2) Update (latest release — keeps messages, rooms & config)
-3) Set User Password (everyone else)
-4) Set OP Password (only you — the admin)
-5) Status
-6) Uninstall
-0) Exit
-```
-
-The menu header shows the installed version, so you can see at a glance whether you are on v2. Type `nokhodichat` in any SSH session to open it. If the menu ever prints "Invalid choice." without you typing anything, it was started from a pipe (stdin is not your keyboard) — v2.0.1 reads from the real terminal instead and exits cleanly instead of looping. Uninstall without the menu:
-
-```bash
-sudo systemctl stop nokhodi-chat; sudo systemctl disable nokhodi-chat
-sudo rm -f /etc/systemd/system/nokhodi-chat.service /usr/local/bin/nokhodichat
-sudo systemctl daemon-reload
-sudo rm -rf /opt/nokhodi-chat   # removes everything, including messages and config
-```
-
-Defaults on a fresh install: **user `changeme123`, OP `changeme-op123`** — change both at once (options 3 and 4). An existing v1 install keeps its old password as the user password, and gets OP `changeme-op123` — change that first.
-
-## 4. How people use it
-
-1. Open `http://<server-ip>:44044`
-2. Enter a password: the **user password** to chat, the **OP password** to chat as 👑 OP
-3. Enter **your own display name** and solve a maths captcha
-4. Pick a room from the list, or open a hidden room's secret link and enter that room's password
-5. Chat. Messages appear live for everyone in that room.
-
-**Sessions:** after logging in, the browser stays logged in for **7 days** (HttpOnly session cookie, persisted in `data/sessions.json`). The display name is also remembered in `localStorage`.
-
-**Migration from v1:** your old messages move into `#general` automatically (`data/messages.json` → `data/room_general.json`, the old file is kept as `messages.json.v1.bak`). Your old password becomes the user password.
-
-## 5. Config — `config.json`
+Created automatically on first run if missing. Passwords are hashes only:
 
 ```json
 {
@@ -108,39 +252,63 @@ Defaults on a fresh install: **user `changeme123`, OP `changeme-op123`** — cha
 }
 ```
 
-- Created automatically on first run if missing.
-- Change passwords with `nokhodichat` options 3/4, in the OP panel, or directly:
-  ```bash
-  ./nokhodi-chat passwd -role user -pass 'new-user-secret'
-  ./nokhodi-chat passwd -role op -pass 'new-op-secret'
-  sudo systemctl restart nokhodi-chat
-  ```
-- Data lives in `data/rooms.json` (room list), `data/room_<id>.json` (each room's history), `data/sessions.json`, `data/bans.json`.
+### Data — `data/`
 
-## 6. API (for reference)
+| File | What it holds |
+|---|---|
+| `data/rooms.json` | The room list (name, hidden, TTL, room-password hash, invite token) |
+| `data/room_<id>.json` | One file per room with that room's message history |
+| `data/sessions.json` | Logins (role + display name + unlocked rooms), 7 days |
+| `data/bans.json` | Display names the OP has banned |
+
+Update never deletes `config.json` or `data/`. Upgrading from v1 moves the old `data/messages.json` into `#general` automatically (the old file is kept as `messages.json.v1.bak`).
+
+---
+
+## API (for reference)
 
 | Endpoint | Method | Who | Purpose |
 |---|---|---|---|
 | `/` | GET | — | Chat UI |
-| `/health` | GET | — | `{"status":"ok", ...}` |
+| `/health` | GET | — | `{"status":"ok", "version": "2.0.1", ...}` |
 | `/api/captcha` | GET | — | New maths captcha `{id, question}` |
 | `/api/login` | POST | — | Password only; returns `role` (`op` / `user`) |
-| `/api/identity` | POST | session | Display name + captcha answer |
-| `/api/me` | GET | session | `{authenticated, has_name, display_name, is_op}` |
-| `/api/rooms` | GET | session | Visible rooms only (hidden rooms are omitted) |
+| `/api/identity` | POST | Session | Display name + captcha answer |
+| `/api/me` | GET | Session | `{authenticated, has_name, display_name, is_op}` |
+| `/api/rooms` | GET | Session | Visible rooms only (hidden rooms are omitted) |
 | `/api/rooms` | POST | OP | Create a room `{name, password, hidden, ttl_seconds}` |
-| `/api/rooms/{id}` | GET | session | Room info — hidden rooms return 404 without link |
-| `/api/rooms/{id}` | PATCH/DELETE | OP | Edit / delete a room |
-| `/api/rooms/{id}/join` | POST | session | Enter a room `{password, invite}` |
-| `/api/rooms/{id}/messages` | GET/POST | joined | Room history / send a message |
-| `/api/rooms/{id}/messages/{mid}` | DELETE | own or OP | Delete a message |
-| `/api/rooms/{id}/events` | GET | joined | SSE live feed for that room |
-| `/api/rooms/{id}/online` | GET | joined | Who is online in the room |
-| `/api/admin/passwords` | POST | OP | Change OP or user password |
+| `/api/rooms/{id}` | GET | Session | Room info — hidden rooms return 404 without the link |
+| `/api/rooms/{id}` | PATCH / DELETE | OP | Edit / delete a room |
+| `/api/rooms/{id}/join` | POST | Session | Enter a room `{password, invite}` |
+| `/api/rooms/{id}/messages` | GET / POST | Joined | Room history / send a message |
+| `/api/rooms/{id}/messages/{mid}` | DELETE | Own message, or OP | Delete a message |
+| `/api/rooms/{id}/events` | GET | Joined | SSE live feed for that room |
+| `/api/rooms/{id}/online` | GET | Joined | Who is online in the room |
+| `/api/admin/passwords` | POST | OP | Change the OP or user password |
 | `/api/admin/ban` | POST | OP | Ban a display name (and log them out) |
-| `/api/logout` | POST | session | Log out |
+| `/api/admin/bans` | GET | OP | List banned names |
+| `/api/admin/unban` | POST | OP | Unban a display name |
+| `/api/logout` | POST | Session | Log out |
 
-## 7. Test locally (no server needed)
+---
+
+## Publish a new version (for the owner)
+
+The release workflow builds the binary on GitHub Actions whenever you push a version tag. Pushes to `main` alone don't create a release.
+
+```bash
+git add .
+git commit -m "nokhodi chat v2.0.1 - ..."
+git push origin main
+git tag v2.0.1
+git push origin v2.0.1
+```
+
+Then check **Actions** — the run should go green — and **Releases** should show `v2.0.1` with `nokhodi-chat-linux-amd64.tar.gz`. Only then will the one-line installer on the server download the new version.
+
+> Don't commit `nokhodi-chat.zip` or `config.json` into the repo — the zip is only for sharing files, and `config.json` holds your password hashes. Both are in `.gitignore` for the binary and data, but check `git status` before you commit.
+
+## Test locally (no server needed)
 
 ```bash
 go vet ./...
@@ -150,11 +318,36 @@ go run . -config config.json
 # user password: changeme123 — OP password: changeme-op123
 ```
 
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Login says the password is wrong | In v2 the login is **password only** — there is no username box. Make sure you're typing the user password (for everyone) or the OP password (for you), not the old v1 `admin` login. If you forgot it, reset it on the server with the `passwd` commands in [Passwords](#passwords). |
+| Menu prints "Invalid choice." with no typing, and flickers | The menu was started from a pipe, not from your keyboard. Fixed in v2.0.1 — update to v2.0.1, then run `nokhodichat` from a normal SSH prompt. |
+| Menu won't take a number | Check your Windows keyboard is in **EN** mode — Persian digits (`۲`) don't count as `2`. |
+| Page doesn't open | Check the service is running: `sudo systemctl status nokhodi-chat`, check the health URL above, and open the port: `sudo ufw allow 44044/tcp`. |
+| Update didn't change the version | The new release wasn't published yet. Check GitHub → Releases for the new tag, and that Actions went green, then run the one-liner again. |
+| A hidden room link says "room not found" | The link needs both the invite token *and* the room password. Check you copied the full link from the OP panel, and that you're entering the room's password — not the login password. |
+| A banned name can't log in | That's the ban working. Unban it from the OP panel or with the `/api/admin/unban` endpoint. |
+
+---
+
 ## Notes & limits
 
-- **Plain HTTP on purpose:** the room is meant for a private server / LAN. If you expose it to the internet, put it behind TLS (Caddy/Nginx reverse proxy) and a firewall — and change both default passwords first.
+- **Plain HTTP on purpose:** the room is meant for a private server / LAN. If you expose it to the internet, put it behind TLS (Caddy / Nginx reverse proxy) and a firewall — and change both default passwords first.
 - **Emoji:** full UTF-8 support, in messages and via the built-in emoji picker.
 - **Storage:** JSON files, no database server to run. Fine for a small private room.
 - **Real-time:** SSE (not WebSockets) — simpler, works through most proxies, auto-reconnects, and needs no external Go libraries.
 - **Self-destruct timing:** the timer starts when a message is *sent*, and applies to new messages in that room. Changing a room's timer does not change messages already sent.
 - **Hidden rooms are not secret by obscurity alone:** the link contains a random token, and the room password is still required. Without both, the server returns 404 and leaks nothing.
+
+---
+
+## Version history
+
+- **v2.0.1** — Menu fix: reads input from the real terminal (no more "Invalid choice." loop from a pipe), version shown in the menu header, uninstall also removes `nokhodichat`.
+- **v2.0.0** — Rooms (mIRC-style), OP / user two-password login, per-room passwords, self-destruct timers, hidden rooms via secret link, online users, kick / ban, `/join` `/list` `/me` `/help`.
+- **v1.0.2** — Renamed to اتاق نخودی, `nokhodichat` command added.
+- **v1.0.0** — First release: single room, shared login, display name + maths captcha, SSE, JSON storage.
