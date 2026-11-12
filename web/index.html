@@ -13,16 +13,13 @@
 <body>
 <div id="app">
 
-  <!-- ===== Login: shared global credentials ===== -->
+  <!-- ===== Login: OP password or user password ===== -->
   <section id="screen-login" class="screen">
     <div class="card">
       <div class="logo">🫛</div>
       <h1>اتاق نخودی</h1>
-      <p class="sub">برای ورود، نام کاربری و رمز عبور مشترک را وارد کنید</p>
+      <p class="sub">رمز عبور را وارد کنید — رمز OP برای مدیر، رمز کاربران برای بقیه</p>
       <form id="login-form">
-        <label>نام کاربری
-          <input id="login-user" type="text" autocomplete="username" placeholder="نام کاربری" required>
-        </label>
         <label>رمز عبور
           <input id="login-pass" type="password" autocomplete="current-password" placeholder="رمز عبور" required>
         </label>
@@ -37,7 +34,7 @@
   <section id="screen-identity" class="screen" hidden>
     <div class="card">
       <div class="logo">👋</div>
-      <h1>خوش آمدید</h1>
+      <h1>خوش آمدید <span id="identity-role"></span></h1>
       <p class="sub">نام نمایشی خودتان را انتخاب کنید و کپچای ساده را حل کنید</p>
       <form id="identity-form">
         <label>نام نمایشی شما
@@ -54,37 +51,114 @@
     </div>
   </section>
 
-  <!-- ===== Chat ===== -->
+  <!-- ===== Chat: rooms sidebar + room ===== -->
   <section id="screen-chat" class="screen chat-screen" hidden>
-    <header class="chat-header">
-      <div class="room">
-        <div class="room-avatar">🫛</div>
-        <div>
-          <h1>اتاق نخودی</h1>
-          <p id="online-line"><span id="me-name"></span> • آنلاین</p>
+    <div class="layout">
+      <aside id="rooms-panel" class="rooms-panel">
+        <div class="rooms-head">
+          <h2>اتاق‌ها</h2>
+          <button id="rooms-close" class="icon-btn" type="button">✕</button>
         </div>
+        <div id="rooms-list" class="rooms-list"></div>
+        <div class="rooms-foot">
+          <button id="op-panel-btn" class="btn primary" type="button" hidden>👑 پنل OP</button>
+          <div id="online-box">
+            <h3>آنلاین در این اتاق</h3>
+            <div id="online-list" class="online-list"></div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="chat-col">
+        <header class="chat-header">
+          <button id="rooms-open" class="icon-btn" type="button" title="اتاق‌ها">☰</button>
+          <div class="room">
+            <div class="room-avatar">🫛</div>
+            <div>
+              <h1 id="room-title">#general</h1>
+              <p id="online-line"><span id="me-name"></span> • <span id="room-ttl"></span></p>
+            </div>
+          </div>
+          <button id="logout-btn" class="icon-btn" title="خروج">🚪</button>
+        </header>
+
+        <main id="messages" class="messages" aria-live="polite"></main>
+
+        <div id="emoji-row" class="emoji-row" hidden>
+          <button type="button">😀</button><button type="button">😂</button><button type="button">😍</button>
+          <button type="button">🥰</button><button type="button">😊</button><button type="button">😉</button>
+          <button type="button">😎</button><button type="button">🤔</button><button type="button">😢</button>
+          <button type="button">😡</button><button type="button">👍</button><button type="button">👏</button>
+          <button type="button">🙏</button><button type="button">❤️</button><button type="button">🔥</button>
+          <button type="button">🎉</button><button type="button">🫛</button><button type="button">😴</button>
+        </div>
+
+        <footer class="composer">
+          <button id="emoji-btn" class="icon-btn" type="button" title="ایموجی">😊</button>
+          <input id="message-input" type="text" maxlength="1000" autocomplete="off"
+                 placeholder="پیام بنویسید… (/help برای دستورها)" enterkeyhint="send">
+          <button id="send-btn" class="btn primary send" type="button">➤</button>
+        </footer>
       </div>
-      <button id="logout-btn" class="icon-btn" title="خروج">🚪</button>
-    </header>
-
-    <main id="messages" class="messages" aria-live="polite"></main>
-
-    <div id="emoji-row" class="emoji-row" hidden>
-      <button type="button">😀</button><button type="button">😂</button><button type="button">😍</button>
-      <button type="button">🥰</button><button type="button">😊</button><button type="button">😉</button>
-      <button type="button">😎</button><button type="button">🤔</button><button type="button">😢</button>
-      <button type="button">😡</button><button type="button">👍</button><button type="button">👏</button>
-      <button type="button">🙏</button><button type="button">❤️</button><button type="button">🔥</button>
-      <button type="button">🎉</button><button type="button">🫛</button><button type="button">😴</button>
     </div>
-
-    <footer class="composer">
-      <button id="emoji-btn" class="icon-btn" type="button" title="ایموجی">😊</button>
-      <input id="message-input" type="text" maxlength="1000" autocomplete="off"
-             placeholder="پیام بنویسید…" enterkeyhint="send">
-      <button id="send-btn" class="btn primary send" type="button">➤</button>
-    </footer>
   </section>
+
+  <!-- ===== Room password modal ===== -->
+  <div id="room-pass-modal" class="modal" hidden>
+    <div class="card">
+      <h1>🔒 اتاق قفل‌شده</h1>
+      <p class="sub" id="room-pass-text">برای ورود به این اتاق رمز آن را وارد کنید</p>
+      <form id="room-pass-form">
+        <input id="room-pass-input" type="password" placeholder="رمز اتاق" required>
+        <p id="room-pass-error" class="error" hidden></p>
+        <button class="btn primary" type="submit">ورود به اتاق</button>
+        <button id="room-pass-cancel" class="btn" type="button">انصراف</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== OP panel modal ===== -->
+  <div id="op-modal" class="modal" hidden>
+    <div class="card wide">
+      <h1>👑 پنل OP</h1>
+      <p class="sub">فقط شما این پنل را می‌بینید</p>
+      <h3>ساخت اتاق جدید</h3>
+      <form id="create-room-form">
+        <input id="new-room-name" type="text" maxlength="30" placeholder="نام اتاق، مثلاً music" required>
+        <input id="new-room-pass" type="password" placeholder="رمز اتاق (اختیاری — خالی = باز)">
+        <label class="check"><input id="new-room-hidden" type="checkbox"> مخفی از لیست — فقط با لینک مخفی قابل ورود</label>
+        <label>پیام‌ها بعد از:
+          <select id="new-room-ttl">
+            <option value="0">هرگز پاک نشوند</option>
+            <option value="600">۱۰ دقیقه</option>
+            <option value="3600">۱ ساعت</option>
+            <option value="86400" selected>۲۴ ساعت</option>
+            <option value="604800">۷ روز</option>
+          </select>
+        </label>
+        <p id="create-room-error" class="error" hidden></p>
+        <button class="btn primary" type="submit">ساخت اتاق</button>
+      </form>
+      <h3>اتاق‌ها — ویرایش / حذف</h3>
+      <div id="op-rooms-list"></div>
+      <h3>تغییر رمزهای ورود</h3>
+      <form id="change-pass-form">
+        <select id="change-pass-role">
+          <option value="user">رمز کاربران (همه)</option>
+          <option value="op">رمز OP (فقط شما)</option>
+        </select>
+        <input id="change-pass-new" type="password" placeholder="رمز جدید (حداقل ۶ حرف)" required>
+        <p id="change-pass-error" class="error" hidden></p>
+        <button class="btn primary" type="submit">تغییر رمز</button>
+      </form>
+      <h3>مسدود کردن یک نام</h3>
+      <form id="ban-form">
+        <input id="ban-name" type="text" maxlength="30" placeholder="نام نمایشی برای مسدود کردن" required>
+        <button class="btn primary" type="submit">مسدود کن</button>
+      </form>
+      <button id="op-close" class="btn" type="button">بستن</button>
+    </div>
+  </div>
 
 </div>
 <script src="/app.js"></script>

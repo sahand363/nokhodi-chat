@@ -1,6 +1,6 @@
 name: Release
 
-# Builds  the pre-compiled binary on GitHub Actions whenever you push a tag:
+# Builds the pre-compiled binary on GitHub Actions whenever you push a tag:
 #   git tag v1.0.0 && git push origin v1.0.0
 # The installer / updater downloads this release — nothing is compiled
 # on the Ubuntu server.

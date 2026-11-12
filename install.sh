@@ -8,7 +8,7 @@
 #   2. Installs it to /opt/nokhodi-chat, creates config.json + data/
 #   3. Installs + starts the systemd service on port 44044
 #   4. Installs the `nokhodichat` command (/usr/local/bin/nokhodichat) to open the menu
-#   5. Opens the management menu (./manage.sh) so you can set the shared login
+#   5. Opens the management menu (./manage.sh) so you can set the OP + user passwords
 set -euo pipefail
 REPO="sahand363/nokhodi-chat"
 INSTALL_DIR="/opt/nokhodi-chat"
@@ -45,7 +45,7 @@ chmod +x /usr/local/bin/nokhodichat
 # Existing installs may still have the old title in config.json — rename it.
 [ -f "$INSTALL_DIR/config.json" ] && sed -i 's/اتاق خواب نخودی/اتاق نخودی/g' "$INSTALL_DIR/config.json" || true
 
-# First run generates config.json (default admin / changeme123) if missing.
+# First run generates config.json (defaults: user changeme123, OP changeme-op123) if missing.
 if [ ! -f "$INSTALL_DIR/config.json" ]; then
   (cd "$INSTALL_DIR" && timeout 3 ./nokhodi-chat -config config.json >/dev/null 2>&1 || true)
 fi
@@ -56,7 +56,15 @@ sleep 1
 IP="$(hostname -I | awk '{print $1}')"
 echo
 echo "✅ Done! Open:  http://$IP:$PORT"
-echo "   Default login: admin / changeme123  — change it now in the menu (option 3)."
+echo "   Installed: $($INSTALL_DIR/nokhodi-chat version)"
+echo "   Default passwords: user changeme123, OP changeme-op123 — change both now in the menu (options 3 and 4)."
 echo "   Manage later with:  nokhodichat   (or sudo /opt/nokhodi-chat/manage.sh)"
 echo
-exec "$INSTALL_DIR/manage.sh"
+# Open the menu on the real terminal, not on the curl pipe this script
+# was run from — otherwise the menu reads EOF and loops "Invalid choice."
+if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  exec "$INSTALL_DIR/manage.sh" < /dev/tty
+else
+  echo "No terminal to open the menu in — run 'nokhodichat' yourself from a normal SSH prompt."
+  exit 0
+fi

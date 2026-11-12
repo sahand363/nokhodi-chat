@@ -1,8 +1,16 @@
-// Command nokhodi-chat is a small, self-hosted Persian chat room.
+// Command nokhodi-chat is a small, self-hosted Persian chat room — v2.
 //
-//   - Single shared global login (username/password in config.json)
+//   - Two entry passwords: OP (admin) and everyone else (user).
+//     The password you log in with decides your role; only the OP can
+//     create rooms, set room passwords, set self-destruct timers,
+//     delete any message, or kick/ban.
+//   - mIRC-style rooms: #general plus rooms the OP creates. A room can
+//     have its own password and a self-destruct timer, and it can be
+//     hidden: hidden rooms are not listed, are only reachable via a
+//     secret link, still need the room password, and return 404 —
+//     no name, no messages — to anyone without link + password.
 //   - Then each visitor picks their own display name + solves a maths captcha
-//   - Messages are stored persistently in data/messages.json
+//   - Messages are stored persistently per room in data/room_<id>.json
 //   - Live updates use Server-Sent Events (SSE) — no external Go deps
 //   - Serves on 0.0.0.0:44044 by default: http://<server-ip>:44044
 //
@@ -21,32 +29,37 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 //go:embed web
 var webFS embed.FS
 
-var version = "1.0.2"
+var version = "2.0.1"
 
-// Config is the on-disk schema for config.json. The password is NEVER
-// stored in plain text — only a salted SHA-256 hash.
+// Config is the on-disk schema for config.json. Passwords are NEVER
+// stored in plain text — only salted SHA-256 hashes.
+// Legacy fields PasswordHash/Salt are the v1 shared password; on load
+// they are migrated to the user (everyone) password.
 type Config struct {
 	Port         int    `json:"port"`
 	Host         string `json:"host"`
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-	Salt         string `json:"salt"`
-	SessionDays  int    `json:"session_days"`
-	DataDir      string `json:"data_dir"`
-	Title        string `json:"title"`
+	Username     string `json:"username,omitempty"`
+	PasswordHash string `json:"password_hash,omitempty"`
+	Salt         string `json:"salt,omitempty"`
+	// v2: two entry passwords.
+	UserPasswordHash  string `json:"user_password_hash,omitempty"`
+	UserSalt          string `json:"user_salt,omitempty"`
+	AdminPasswordHash string `json:"admin_password_hash,omitempty"`
+	AdminSalt         string `json:"admin_salt,omitempty"`
+	SessionDays       int    `json:"session_days"`
+	DataDir           string `json:"data_dir"`
+	Title             string `json:"title"`
 }
 
 func defaultConfig() Config {
 	return Config{
 		Port:        44044,
 		Host:        "0.0.0.0",
-		Username:    "admin",
 		SessionDays: 7,
 		DataDir:     "data",
 		Title:       "اتاق نخودی",
@@ -61,16 +74,60 @@ func newSalt() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+func newTokenHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func hashPassword(password, salt string) string {
 	sum := sha256.Sum256([]byte(salt + ":" + password))
 	return hex.EncodeToString(sum[:])
 }
 
-func checkPassword(cfg *Config, password string) bool {
-	if cfg.PasswordHash == "" || cfg.Salt == "" {
+func hashMatches(password, salt, hash string) bool {
+	if hash == "" || salt == "" || password == "" {
 		return false
 	}
-	return hashPassword(password, cfg.Salt) == cfg.PasswordHash
+	return hashPassword(password, salt) == hash
+}
+
+// checkRole returns "op" for the OP password, "user" for the
+// everyone-else password, "" for neither. OP is checked first so the
+// two passwords must be different to be useful.
+func checkRole(cfg *Config, password string) string {
+	if hashMatches(password, cfg.AdminSalt, cfg.AdminPasswordHash) {
+		return "op"
+	}
+	if hashMatches(password, cfg.UserSalt, cfg.UserPasswordHash) {
+		return "user"
+	}
+	// Legacy v1 fallback: the old shared password is the user password.
+	if hashMatches(password, cfg.Salt, cfg.PasswordHash) {
+		return "user"
+	}
+	return ""
+}
+
+func setPassword(cfg *Config, role, password string) error {
+	salt, err := newSalt()
+	if err != nil {
+		return err
+	}
+	h := hashPassword(password, salt)
+	switch role {
+	case "op", "admin":
+		cfg.AdminSalt, cfg.AdminPasswordHash = salt, h
+	case "user":
+		cfg.UserSalt, cfg.UserPasswordHash = salt, h
+		// Keep the legacy fields in sync so old tooling still sees a password.
+		cfg.Salt, cfg.PasswordHash = salt, h
+	default:
+		return fmt.Errorf("unknown role %q (want op or user)", role)
+	}
+	return nil
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -78,25 +135,37 @@ func loadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// First run: create a config with a random salt and the
-			// well-known default password. The operator MUST change it
-			// via ./manage.sh -> option 3 (or `passwd` below).
-			salt, err := newSalt()
-			if err != nil {
+			// First run: user password changeme123, OP password changeme-op123.
+			// The operator MUST change both via `nokhodichat` menu 3 and 4.
+			if err := setPassword(&cfg, "user", "changeme123"); err != nil {
 				return nil, err
 			}
-			cfg.Salt = salt
-			cfg.PasswordHash = hashPassword("changeme123", salt)
+			if err := setPassword(&cfg, "op", "changeme-op123"); err != nil {
+				return nil, err
+			}
 			if err := saveConfig(path, &cfg); err != nil {
 				return nil, err
 			}
-			log.Printf("created %s with default login admin / changeme123 — change it with ./manage.sh (option 3)", path)
+			log.Printf("created %s — defaults: user changeme123, OP changeme-op123 — change both with nokhodichat (options 3 and 4)", path)
 			return &cfg, nil
 		}
 		return nil, err
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	// Migrate v1: old shared password becomes the user password.
+	if cfg.UserPasswordHash == "" && cfg.PasswordHash != "" {
+		cfg.UserPasswordHash, cfg.UserSalt = cfg.PasswordHash, cfg.Salt
+	}
+	// An existing v1 install has no OP password yet — give it the
+	// well-known default so the OP can log in and change it at once.
+	// (A fresh v2 install already has one from the branch above.)
+	if cfg.AdminPasswordHash == "" {
+		if err := setPassword(&cfg, "op", "changeme-op123"); err == nil {
+			_ = saveConfig(path, &cfg)
+			log.Printf("migrated %s: OP password set to default changeme-op123 — change it with nokhodichat (option 4)", path)
+		}
 	}
 	if cfg.Port == 0 {
 		cfg.Port = 44044
@@ -135,7 +204,8 @@ func main() {
 	flag.Parse()
 
 	// Small CLI helpers used by manage.sh, e.g.:
-	//   ./nokhodi-chat passwd -config config.json -user admin -pass 'new-secret'
+	//   ./nokhodi-chat passwd -role op -pass 'new-op-secret'
+	//   ./nokhodi-chat passwd -role user -pass 'new-user-secret'
 	if len(flag.Args()) > 0 {
 		switch flag.Arg(0) {
 		case "version":
@@ -153,7 +223,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	// Keep the config path on the server struct for the passwd flow.
 	srv, err := NewServer(cfg, *configPath)
 	if err != nil {
 		log.Fatalf("server: %v", err)
@@ -161,24 +230,24 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	log.Printf("اتاق نخودی — nokhodi-chat %s listening on http://%s", version, addr)
-	log.Printf("open http://<server-ip>:%d  (default login admin / changeme123 — change it!)", cfg.Port)
+	log.Printf("open http://<server-ip>:%d  (user changeme123 / OP changeme-op123 by default — change both!)", cfg.Port)
 	if err := http.ListenAndServe(addr, srv.routes()); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// runPasswd implements `./nokhodi-chat passwd -user X -pass Y`.
-// It is how manage.sh changes the shared global credentials safely:
+// runPasswd implements `./nokhodi-chat passwd -role op|user -pass Y`.
+// It is how manage.sh changes the two entry passwords safely:
 // it re-hashes with a fresh salt and writes only the hash to config.json.
 func runPasswd(configPath string) error {
 	fs := flag.NewFlagSet("passwd", flag.ExitOnError)
-	user := fs.String("user", "", "new shared username")
-	pass := fs.String("pass", "", "new shared password")
+	role := fs.String("role", "user", "which password to set: op or user")
+	pass := fs.String("pass", "", "new password")
 	cfgPath := fs.String("config", configPath, "path to config.json")
 	_ = fs.Parse(os.Args[2:])
 
-	if *user == "" || *pass == "" {
-		return fmt.Errorf("usage: nokhodi-chat passwd -user <name> -pass <password> [-config config.json]")
+	if *pass == "" {
+		return fmt.Errorf("usage: nokhodi-chat passwd -role op|user -pass <password> [-config config.json]")
 	}
 	if len(*pass) < 6 {
 		return fmt.Errorf("password must be at least 6 characters")
@@ -187,16 +256,12 @@ func runPasswd(configPath string) error {
 	if err != nil {
 		return err
 	}
-	salt, err := newSalt()
-	if err != nil {
+	if err := setPassword(cfg, *role, *pass); err != nil {
 		return err
 	}
-	cfg.Username = strings.TrimSpace(*user)
-	cfg.Salt = salt
-	cfg.PasswordHash = hashPassword(*pass, salt)
 	if err := saveConfig(*cfgPath, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("credentials updated in %s (user %q, password stored as salted hash only)\n", *cfgPath, cfg.Username)
+	fmt.Printf("%s password updated in %s (stored as salted hash only)\n", *role, *cfgPath)
 	return nil
 }

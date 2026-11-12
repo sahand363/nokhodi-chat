@@ -15,11 +15,32 @@ import (
 
 // Session is a browser login. It is persisted to data/sessions.json so a
 // restart does not log everyone out — sessions live SessionDays (7 by default).
+// Role is "op" or "user". UnlockedRooms holds the room IDs this session
+// has already entered (room password given / open room joined).
 type Session struct {
-	Token       string    `json:"token"`
-	DisplayName string    `json:"display_name"`
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	Token         string    `json:"token"`
+	Role          string    `json:"role"`
+	DisplayName   string    `json:"display_name"`
+	UnlockedRooms []string  `json:"unlocked_rooms,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
+func (s *Session) IsOP() bool { return s != nil && s.Role == "op" }
+
+func (s *Session) HasRoom(id string) bool {
+	if s == nil {
+		return false
+	}
+	if s.IsOP() {
+		return true
+	}
+	for _, r := range s.UnlockedRooms {
+		if r == id {
+			return true
+		}
+	}
+	return false
 }
 
 type SessionStore struct {
@@ -53,6 +74,9 @@ func NewSessionStore(dataDir string, ttl time.Duration) (*SessionStore, error) {
 		now := time.Now()
 		for _, s := range list {
 			if s != nil && s.ExpiresAt.After(now) {
+				if s.Role == "" {
+					s.Role = "user"
+				}
 				st.sessions[s.Token] = s
 			}
 		}
@@ -68,13 +92,16 @@ func newToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (st *SessionStore) Create() (*Session, error) {
+func (st *SessionStore) Create(role string) (*Session, error) {
 	tok, err := newToken()
 	if err != nil {
 		return nil, err
 	}
+	if role != "op" {
+		role = "user"
+	}
 	now := time.Now()
-	s := &Session{Token: tok, CreatedAt: now, ExpiresAt: now.Add(st.ttl)}
+	s := &Session{Token: tok, Role: role, CreatedAt: now, ExpiresAt: now.Add(st.ttl)}
 	st.mu.Lock()
 	st.sessions[tok] = s
 	err = st.saveLocked()
@@ -122,6 +149,56 @@ func (st *SessionStore) SetName(token, name string) error {
 	return st.saveLocked()
 }
 
+// UnlockRoom records that this session entered a room (password given).
+func (st *SessionStore) UnlockRoom(token, roomID string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	s, ok := st.sessions[token]
+	if !ok {
+		return
+	}
+	for _, r := range s.UnlockedRooms {
+		if r == roomID {
+			return
+		}
+	}
+	s.UnlockedRooms = append(s.UnlockedRooms, roomID)
+	_ = st.saveLocked()
+}
+
+// DeleteByName removes every active session with that display name.
+// Used by the OP kick: the kicked person is logged out immediately.
+func (st *SessionStore) DeleteByName(name string) int {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	n := 0
+	for tok, s := range st.sessions {
+		if strings.EqualFold(strings.TrimSpace(s.DisplayName), strings.TrimSpace(name)) && !s.IsOP() {
+			delete(st.sessions, tok)
+			n++
+		}
+	}
+	if n > 0 {
+		_ = st.saveLocked()
+	}
+	return n
+}
+
+// All returns a snapshot of active sessions (for online lists).
+func (st *SessionStore) All() []*Session {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	now := time.Now()
+	out := []*Session{}
+	for _, s := range st.sessions {
+		if s.ExpiresAt.After(now) && s.DisplayName != "" {
+			cp := *s
+			out = append(out, &cp)
+		}
+	}
+	return out
+}
+
 func (st *SessionStore) Delete(token string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -146,6 +223,86 @@ func (st *SessionStore) saveLocked() error {
 		return err
 	}
 	return os.Rename(tmp, st.path)
+}
+
+// --- Bans (OP only) ---
+
+// BanStore is data/bans.json: display names the OP has banned.
+// A banned name cannot pick that name at identity time and cannot send.
+type BanStore struct {
+	mu    sync.Mutex
+	path  string
+	names map[string]bool // lower-cased
+}
+
+func NewBanStore(dataDir string) (*BanStore, error) {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, err
+	}
+	b := &BanStore{path: filepath.Join(dataDir, "bans.json"), names: map[string]bool{}}
+	data, err := os.ReadFile(b.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return b, nil
+		}
+		return nil, err
+	}
+	if len(data) > 0 {
+		var list []string
+		if err := json.Unmarshal(data, &list); err != nil {
+			return nil, err
+		}
+		for _, n := range list {
+			b.names[strings.ToLower(strings.TrimSpace(n))] = true
+		}
+	}
+	return b, nil
+}
+
+func (b *BanStore) IsBanned(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.names[strings.ToLower(strings.TrimSpace(name))]
+}
+
+func (b *BanStore) Add(name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.names[strings.ToLower(strings.TrimSpace(name))] = true
+	_ = b.saveLocked()
+}
+
+func (b *BanStore) Remove(name string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.names, strings.ToLower(strings.TrimSpace(name)))
+	_ = b.saveLocked()
+}
+
+func (b *BanStore) List() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := []string{}
+	for n := range b.names {
+		out = append(out, n)
+	}
+	return out
+}
+
+func (b *BanStore) saveLocked() error {
+	list := []string{}
+	for n := range b.names {
+		list = append(list, n)
+	}
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := b.path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, b.path)
 }
 
 // --- Maths captcha (addition / subtraction, 5-minute expiry) ---
