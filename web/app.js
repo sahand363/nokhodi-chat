@@ -16,6 +16,51 @@
   let presenceTimer = null;
   let onlineTimer = null;
 
+  // --- Notification sound (v2.2.2) ---
+  // Beeps when the tab is in the background (hidden) and someone else
+  // sends a message — but only once per 20 messages while you are away,
+  // so a busy room does not beep non-stop. When you come back to the
+  // tab the counter resets. It cannot beep if the tab is fully closed
+  // (no page is running then) — the tab has to be open, just in the
+  // background. No sound file is needed: the beep is made with Web Audio.
+  let soundOn = localStorage.getItem("nokhodi_sound") !== "off";
+  let awayCount = 0;
+  let audioCtx = null;
+  function unlockAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") void audioCtx.resume();
+    } catch (_) {}
+  }
+  // Browsers only let a page make sound after the user has interacted
+  // with it once — so unlock audio on the first click/keypress.
+  document.addEventListener("pointerdown", unlockAudio);
+  document.addEventListener("keydown", unlockAudio);
+  function playNotifySound() {
+    if (!soundOn) return;
+    try {
+      unlockAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      [880, 1174.66].forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        const t0 = now + i * 0.18;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.18);
+      });
+    } catch (_) { /* this browser cannot play audio */ }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) awayCount = 0; // back in the tab: start counting again
+  });
+
   function show(name) {
     for (const k in screens) screens[k].hidden = k !== name;
   }
@@ -204,7 +249,7 @@
       if (!data.messages || data.messages.length === 0) {
         list.innerHTML = '<p class="empty">هنوز پیامی نیست — اولین پیام را شما بفرستید 🫛</p>';
       } else {
-        data.messages.forEach(addMessage);
+        data.messages.forEach((mm) => addMessage(mm, false));
       }
     } catch (e) {
       list.innerHTML = '<p class="empty">خطا در گرفتن پیام‌ها — صفحه را تازه کنید</p>';
@@ -215,9 +260,15 @@
   }
 
   // --- Messages ---
-  function addMessage(m) {
+  // live=true only for messages arriving over SSE right now.
+  // History loaded on open, and your own sent message, never beep.
+  function addMessage(m, live) {
     if (m.id <= lastId) return;
     lastId = m.id;
+    if (live && m.name !== me && document.hidden) {
+      awayCount++;
+      if (awayCount % 20 === 1) playNotifySound(); // 1st, 21st, 41st... message while away
+    }
     const day = faDay(m.unix);
     if (day !== lastDay) {
       lastDay = day;
@@ -293,7 +344,7 @@
     if (es) es.close();
     es = new EventSource("/api/rooms/" + encodeURIComponent(roomId) + "/events");
     es.addEventListener("message", (e) => {
-      try { const ev = JSON.parse(e.data); if (ev.message) addMessage(ev.message); } catch (_) {}
+      try { const ev = JSON.parse(e.data); if (ev.message) addMessage(ev.message, true); } catch (_) {}
     });
     es.addEventListener("delete", (e) => {
       try { const ev = JSON.parse(e.data); if (ev.message_id) removeMessage(ev.message_id); } catch (_) {}
@@ -343,7 +394,7 @@
     if (!text || !currentRoom) return;
     // /commands
     if (text === "/help") {
-      alert("/join #name — ورود به اتاق\n/list — دیدن اتاق‌ها\n/me کار — * شما کار می‌کنید\n📎 — ارسال عکس یا فایل (حداکثر ۱۰ مگابایت، ۲۰ فایل در روز)");
+      alert("/join #name — ورود به اتاق\n/list — دیدن اتاق‌ها\n/me کار — * شما کار می‌کنید\n📎 — ارسال عکس یا فایل (حداکثر ۵۰ مگابایت، ۵ فایل در هفته)");
       input.value = "";
       return;
     }
@@ -379,7 +430,7 @@
     if (e.key === "Enter") { e.preventDefault(); sendMessage(); }
   });
 
-  // --- Uploads: images and files (max 10 MB per file) ---
+  // --- Uploads: images and files (max 50 MB per file) ---
   function fmtSize(n) {
     if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
     if (n >= 1024) return Math.round(n / 1024) + " KB";
@@ -390,8 +441,8 @@
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
     if (!file || !currentRoom) return;
-    if (file.size > 10 * 1024 * 1024) {
-      alert("فایل خیلی بزرگ است — حداکثر ۱۰ مگابایت برای هر فایل");
+    if (file.size > 50 * 1024 * 1024) {
+      alert("فایل خیلی بزرگ است — حداکثر ۵۰ مگابایت برای هر فایل");
       return;
     }
     const caption = $("message-input").value.trim();
@@ -407,6 +458,15 @@
     } catch (err) {
       alert(err.message);
     }
+  });
+
+  // Sound on/off button in the header (choice is remembered per browser).
+  $("sound-btn").textContent = soundOn ? "🔊" : "🔇";
+  $("sound-btn").addEventListener("click", () => {
+    soundOn = !soundOn;
+    localStorage.setItem("nokhodi_sound", soundOn ? "on" : "off");
+    $("sound-btn").textContent = soundOn ? "🔊" : "🔇";
+    if (soundOn) playNotifySound(); // short test beep when turning it on
   });
 
   $("emoji-btn").addEventListener("click", () => {

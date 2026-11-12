@@ -194,8 +194,11 @@ func TestUploadValidation(t *testing.T) {
 	if _, _, _, err := validateUpload("script.js", 1000, 10); err == nil {
 		t.Fatal("js must be rejected")
 	}
-	// Size limit: 10 MB per file by default.
-	if _, _, _, err := validateUpload("big.png", 11*1024*1024, 10); err == nil {
+	// Size limit: 50 MB per file by default (v2.2.2).
+	if _, _, _, err := validateUpload("big.png", 11*1024*1024, 50); err != nil {
+		t.Fatalf("11 MB must be allowed at a 50 MB limit, err=%v", err)
+	}
+	if _, _, _, err := validateUpload("big.png", 51*1024*1024, 50); err == nil {
 		t.Fatal("file over the size limit must be rejected")
 	}
 	if _, _, _, err := validateUpload("empty.png", 0, 10); err == nil {
@@ -225,6 +228,22 @@ func TestUploadQuotaStats(t *testing.T) {
 	count, _, total = s.AttachmentStats("سارا")
 	if count != 0 || total != 0 {
 		t.Fatalf("after delete stats = %d, %d — want 0, 0", count, total)
+	}
+}
+
+func TestUploadLimitsDefaults(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.MaxUploadMB != 50 {
+		t.Fatalf("MaxUploadMB = %d, want 50", cfg.MaxUploadMB)
+	}
+	if cfg.MaxUploadsPerUserPerWeek != 5 {
+		t.Fatalf("MaxUploadsPerUserPerWeek = %d, want 5", cfg.MaxUploadsPerUserPerWeek)
+	}
+	if cfg.MaxUploadBytesPerUserPerDay != 150*1024*1024 {
+		t.Fatalf("MaxUploadBytesPerUserPerDay = %d, want 150 MB", cfg.MaxUploadBytesPerUserPerDay)
+	}
+	if cfg.MaxUploadBytesPerUserTotal != 200*1024*1024 {
+		t.Fatalf("MaxUploadBytesPerUserTotal = %d, want 200 MB", cfg.MaxUploadBytesPerUserTotal)
 	}
 }
 

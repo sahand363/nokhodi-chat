@@ -35,7 +35,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-var version = "2.2.1"
+var version = "2.2.2"
 
 // Config is the on-disk schema for config.json. Passwords are NEVER
 // stored in plain text — only salted SHA-256 hashes.
@@ -63,13 +63,13 @@ type Config struct {
 	TLSCertFile string `json:"tls_cert_file,omitempty"`
 	TLSKeyFile  string `json:"tls_key_file,omitempty"`
 	// v2.2: uploads — images and files, with per-user limits.
-	// MaxUploadMB is the largest single file (MB). Per user, per day:
-	// at most MaxUploadsPerUserPerDay files and MaxUploadBytesPerUserPerDay
-	// bytes in total; MaxUploadBytesPerUserTotal is the most a user may
-	// have stored on disk at once (older files are freed when their
-	// messages expire or are deleted).
+	// MaxUploadMB is the largest single file (MB). Per user: at most
+	// MaxUploadsPerUserPerWeek files per week, at most
+	// MaxUploadBytesPerUserPerDay bytes per day, and at most
+	// MaxUploadBytesPerUserTotal bytes stored on disk at once
+	// (older files are freed when their messages expire or are deleted).
 	MaxUploadMB                 int   `json:"max_upload_mb"`
-	MaxUploadsPerUserPerDay     int   `json:"max_uploads_per_user_per_day"`
+	MaxUploadsPerUserPerWeek    int   `json:"max_uploads_per_user_per_week"`
 	MaxUploadBytesPerUserPerDay int64 `json:"max_upload_bytes_per_user_per_day"`
 	MaxUploadBytesPerUserTotal  int64 `json:"max_upload_bytes_per_user_total"`
 }
@@ -89,11 +89,11 @@ func defaultConfig() Config {
 		SessionDays: 7,
 		DataDir:     "data",
 		Title:       "اتاق نخودی",
-		// Upload limits (v2.2): 10 MB per file, 20 files / 100 MB per
-		// user per day, 200 MB stored per user at once.
-		MaxUploadMB:                 10,
-		MaxUploadsPerUserPerDay:     20,
-		MaxUploadBytesPerUserPerDay: 100 * 1024 * 1024,
+		// Upload limits (v2.2.2): 50 MB per file, 5 files per user
+		// per week, 150 MB per user per day, 200 MB stored per user.
+		MaxUploadMB:                 50,
+		MaxUploadsPerUserPerWeek:    5,
+		MaxUploadBytesPerUserPerDay: 150 * 1024 * 1024,
 		MaxUploadBytesPerUserTotal:  200 * 1024 * 1024,
 	}
 }
@@ -183,6 +183,11 @@ func loadConfig(path string) (*Config, error) {
 		}
 		return nil, err
 	}
+	// Zero the upload limits before unmarshal: cfg starts as
+	// defaultConfig(), so without this an old config file that has no
+	// weekly limit would still show Week=5 (the default) and the
+	// v2.2.2 migration below would never trigger.
+	cfg.MaxUploadMB, cfg.MaxUploadsPerUserPerWeek, cfg.MaxUploadBytesPerUserPerDay, cfg.MaxUploadBytesPerUserTotal = 0, 0, 0, 0
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
@@ -214,18 +219,27 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Title == "" {
 		cfg.Title = "اتاق نخودی"
 	}
-	// Upload limits: 0 in an old config means "not set yet" — fill defaults.
-	if cfg.MaxUploadMB <= 0 {
-		cfg.MaxUploadMB = 10
-	}
-	if cfg.MaxUploadsPerUserPerDay <= 0 {
-		cfg.MaxUploadsPerUserPerDay = 20
-	}
-	if cfg.MaxUploadBytesPerUserPerDay <= 0 {
-		cfg.MaxUploadBytesPerUserPerDay = 100 * 1024 * 1024
-	}
-	if cfg.MaxUploadBytesPerUserTotal <= 0 {
+	// Upload limits. v2.2.2 changed them (50 MB/file, 5 files/week,
+	// 150 MB/day, 200 MB stored), so a config from v2.2.0/2.2.1 — which
+	// has no weekly limit at all — is migrated to the new limits in
+	// one go and saved. A config that already has a weekly limit
+	// keeps the owner's numbers; only missing (0) values get defaults.
+	if cfg.MaxUploadsPerUserPerWeek <= 0 {
+		cfg.MaxUploadMB = 50
+		cfg.MaxUploadsPerUserPerWeek = 5
+		cfg.MaxUploadBytesPerUserPerDay = 150 * 1024 * 1024
 		cfg.MaxUploadBytesPerUserTotal = 200 * 1024 * 1024
+		_ = saveConfig(path, &cfg)
+	} else {
+		if cfg.MaxUploadMB <= 0 {
+			cfg.MaxUploadMB = 50
+		}
+		if cfg.MaxUploadBytesPerUserPerDay <= 0 {
+			cfg.MaxUploadBytesPerUserPerDay = 150 * 1024 * 1024
+		}
+		if cfg.MaxUploadBytesPerUserTotal <= 0 {
+			cfg.MaxUploadBytesPerUserTotal = 200 * 1024 * 1024
+		}
 	}
 	return &cfg, nil
 }

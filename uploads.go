@@ -14,9 +14,9 @@ import (
 // Uploads (v2.2): images and files in chat.
 //
 // Limits, per user (from config.json — change them there, then restart):
-//   - MaxUploadMB (default 10 MB) — largest single file
-//   - MaxUploadsPerUserPerDay (default 20) — files per user per day
-//   - MaxUploadBytesPerUserPerDay (default 100 MB) — bytes per user per day
+//   - MaxUploadMB (default 50 MB) — largest single file
+//   - MaxUploadsPerUserPerWeek (default 5) — files per user per week
+//   - MaxUploadBytesPerUserPerDay (default 150 MB) — bytes per user per day
 //   - MaxUploadBytesPerUserTotal (default 200 MB) — bytes a user may
 //     have stored at once; freed when a message expires or is deleted
 //
@@ -78,12 +78,12 @@ func validateUpload(fileName string, size int64, maxMB int) (ext, mimeType strin
 	return ext, mimeType, isImage, nil
 }
 
-// checkUploadQuota enforces the per-user daily and total limits.
+// checkUploadQuota enforces the per-user weekly, daily and total limits.
 // Returns a Persian/English error message when the user is over a limit.
 func (s *Server) checkUploadQuota(name string, size int64) error {
-	count24h, bytes24h, totalBytes := s.store.AttachmentStats(name)
-	if count24h >= s.cfg.MaxUploadsPerUserPerDay {
-		return fmt.Errorf("you have sent %d files today — the limit is %d files per day", count24h, s.cfg.MaxUploadsPerUserPerDay)
+	count7d, bytes24h, totalBytes := s.store.AttachmentStats(name)
+	if count7d >= s.cfg.MaxUploadsPerUserPerWeek {
+		return fmt.Errorf("you have sent %d files this week — the limit is %d files per week", count7d, s.cfg.MaxUploadsPerUserPerWeek)
 	}
 	if bytes24h+size > s.cfg.MaxUploadBytesPerUserPerDay {
 		return fmt.Errorf("that would pass your daily limit of %s per day", formatBytes(s.cfg.MaxUploadBytesPerUserPerDay))

@@ -97,13 +97,22 @@ Click the **📎** button right next to the ➤ send button (or write a caption 
 - **Images** (JPG, PNG, WebP, **GIF** — animated GIFs play) are shown **big in the chat** (up to 320 px wide). Click an image to open it full-size in a new tab.
 - **Other files** (PDF, TXT, MD, CSV, ZIP, MP3, MP4, Word / Excel / PowerPoint) show as a **download card** with the file name and size — click it to download.
 - **Limits, per user:**
-  - **10 MB** maximum per file
-  - **20 files** per user per day
-  - **100 MB** per user per day in total
+  - **50 MB** maximum per file
+  - **5 files** per user per week
+  - **150 MB** per user per day in total
   - **200 MB** stored per user at once — freed when a message expires or is deleted
 - Executables and scripts (`.exe`, `.js`, `.html`, …) are rejected.
 - Only people who have joined that room can download its files — hidden rooms' files stay hidden the same way. A file is deleted from disk when its message is deleted, expires, or its room is deleted.
-- To change the limits, edit `config.json` (`max_upload_mb`, `max_uploads_per_user_per_day`, `max_upload_bytes_per_user_per_day`, `max_upload_bytes_per_user_total`) and restart the service.
+- To change the limits, edit `config.json` (`max_upload_mb`, `max_uploads_per_user_per_week`, `max_upload_bytes_per_user_per_day`, `max_upload_bytes_per_user_total`) and restart the service. (Updating from v2.2.0/2.2.1 automatically moves your config to the new limits above.)
+
+### Notification sound
+
+When the chat tab is open but in the background (you're on another tab, or the window is minimized) and someone else sends a message, the tab plays a short two-tone beep — **but only once per 20 messages** while you're away, so a busy room doesn't beep non-stop. When you come back to the tab, the counter resets.
+
+- The 🔊 button in the chat header turns the sound on/off (remembered in that browser).
+- No sound file is needed — the beep is made by the browser itself (Web Audio).
+- It only works while the tab is open in the background. If the tab is **fully closed**, nothing can beep — the page isn't running. (Real push notifications for a closed tab would need a service worker + server push, which this version doesn't have.)
+- Browsers only allow sound after you've clicked or typed in the page once — so click in the chat once after opening it, and the beep will work from then on.
 
 ---
 
@@ -428,6 +437,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.2.2** — Upload limits changed (50 MB per file, 5 files per user per week, 150 MB per user per day, 200 MB stored — old configs are migrated automatically on restart), notification beep when the tab is in the background (once per 20 messages while away, 🔊/🔇 toggle in the header).
 - **v2.2.1** — Version badge in the chat header (and login screen), no-cache headers so a reloaded tab always gets the new page, 📎 moved next to the send button with a visible background, SSH menu is plain ASCII only (no Persian characters — the old box-drawing header showed as boxes in some terminals).
 - **v2.2.0** — Images and files in chat: 📎 upload button, images (incl. animated GIFs) shown big, other files as download cards, per-user limits (10 MB per file, 20 files / 100 MB per day, 200 MB stored), files deleted with their message.
 - **v2.1.0** — SSL / TLS from the menu: self-signed or Let's Encrypt, disable, delete, and re-issue. Same port serves HTTPS when on, HTTP when off.

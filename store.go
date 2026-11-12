@@ -183,26 +183,30 @@ func (s *Store) AddAttachment(roomID, name, text string, ttlSeconds int64, att *
 	return m, nil
 }
 
-// AttachmentStats counts one user's uploads: how many files and how
-// many bytes in the last 24 hours, and how many bytes they have
-// stored in total right now. Used for the per-user upload limits.
-func (s *Store) AttachmentStats(name string) (count24h int, bytes24h, totalBytes int64) {
+// AttachmentStats counts one user's uploads: how many files in the
+// last 7 days, how many bytes in the last 24 hours, and how many
+// bytes they have stored in total right now. Used for the
+// per-user upload limits (5 files/week, 150 MB/day, 200 MB stored).
+func (s *Store) AttachmentStats(name string) (count7d int, bytes24h, totalBytes int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	since := time.Now().Add(-24 * time.Hour)
+	sinceWeek := time.Now().Add(-7 * 24 * time.Hour)
+	sinceDay := time.Now().Add(-24 * time.Hour)
 	for _, msgs := range s.messages {
 		for _, m := range msgs {
 			if m.Attachment == nil || m.Name != name {
 				continue
 			}
 			totalBytes += m.Attachment.Size
-			if m.CreatedAt.After(since) {
-				count24h++
+			if m.CreatedAt.After(sinceWeek) {
+				count7d++
+			}
+			if m.CreatedAt.After(sinceDay) {
 				bytes24h += m.Attachment.Size
 			}
 		}
 	}
-	return count24h, bytes24h, totalBytes
+	return count7d, bytes24h, totalBytes
 }
 
 // Last returns up to n most recent, non-expired messages, oldest first.
