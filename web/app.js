@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const screens = { login: $("screen-login"), identity: $("screen-identity"), chat: $("screen-chat") };
+  const screens = { login: $("screen-login"), identity: $("screen-identity"), chat: $("screen-chat"), private: $("screen-private") };
   let me = "";
   let isOP = false;
   let rooms = [];
@@ -16,10 +16,11 @@
   let presenceTimer = null;
   let onlineTimer = null;
 
-  // v2.3: private room link /r/<code> — focus mode. The guest sees
+  // v2.3/v2.4: private room link /r/<code> — focus mode. The guest sees
   // ONLY that one room: no room list, no OP panel, no online list,
-  // and /join and /list are disabled. The room password (if any) is
-  // still asked for, and the login password is still asked for first.
+  // and /join and /list are disabled. A guest enters with just the
+  // room password (no main login, no captcha); someone already logged
+  // in uses the normal flow instead.
   const privateMatch = location.pathname.match(/^\/r\/([a-z0-9]+)\/?$/);
   const privateCode = privateMatch ? privateMatch[1] : "";
   const focusMode = !!privateCode;
@@ -181,12 +182,15 @@
 
   function roomById(id) { return rooms.find((r) => r.id === id); }
 
-  async function selectRoom(id, invite) {
-    let room = roomById(id);
-    // Hidden room from a link: it is not in the list, fetch it by id+invite.
+  async function selectRoom(id, invite, knownRoom) {
+    let room = knownRoom || roomById(id);
+    // Hidden room from a link: it is not in the list, fetch it by id.
+    // A private link code (?code=) authorizes the fetch for hidden rooms.
     if (!room) {
       try {
-        const q = invite ? ("?invite=" + encodeURIComponent(invite)) : "";
+        let q = "";
+        if (focusMode) q = "?code=" + encodeURIComponent(privateCode);
+        else if (invite) q = "?invite=" + encodeURIComponent(invite);
         room = await api("/api/rooms/" + encodeURIComponent(id) + q);
         rooms.push(room);
         renderRooms();
@@ -196,11 +200,12 @@
       }
     }
     // Join: locked rooms need a password, open rooms join with one click.
+    // A private link code authorizes the join for hidden rooms too.
     try {
       const joined = await api("/api/rooms/" + encodeURIComponent(id) + "/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: "", invite: invite || "" }),
+        body: JSON.stringify({ password: "", invite: invite || "", private_code: focusMode ? privateCode : "" }),
       });
       room = joined;
     } catch (e) {
@@ -224,7 +229,7 @@
       const joined = await api("/api/rooms/" + encodeURIComponent(pendingRoom.id) + "/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: $("room-pass-input").value, invite: pendingRoom.invite || "" }),
+        body: JSON.stringify({ password: $("room-pass-input").value, invite: pendingRoom.invite || "", private_code: focusMode ? privateCode : "" }),
       });
       $("room-pass-modal").hidden = true;
       pendingRoom = null;
@@ -719,6 +724,47 @@
     } catch (err) { alert(err.message); }
   });
 
+  // --- Private link guest entry (v2.4) ---
+  // A guest opening /r/<code> enters with just a display name and the
+  // room password — no main login, no captcha. The room password field
+  // is hidden when the room has no password.
+  async function showPrivateScreen() {
+    show("private");
+    try {
+      const room = await api("/api/private/" + encodeURIComponent(privateCode));
+      $("private-room-name").textContent = "#" + room.name;
+      $("private-pass-label").hidden = !room.locked;
+      const saved = localStorage.getItem("nokhodi_name") || "";
+      if (saved) $("private-name").value = saved;
+      $("private-name").focus();
+    } catch (e) {
+      showErr($("private-error"), "این لینک خصوصی دیگر معتبر نیست — ممکن است OP آن را حذف کرده باشد");
+      $("private-join-btn").disabled = true;
+    }
+  }
+
+  $("private-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("private-join-btn");
+    btn.disabled = true;
+    showErr($("private-error"), "");
+    try {
+      const data = await api("/api/private/" + encodeURIComponent(privateCode) + "/enter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: $("private-name").value.trim(), password: $("private-pass").value }),
+      });
+      me = data.display_name;
+      isOP = false;
+      localStorage.setItem("nokhodi_name", me);
+      await enterChat();
+    } catch (err) {
+      showErr($("private-error"), err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // --- Boot ---
   async function enterChat() {
     $("me-name").textContent = me + (isOP ? " 👑 OP" : "");
@@ -726,11 +772,14 @@
     applyFocusMode();
     await loadRooms();
     // Private room link? /r/<code> — resolve it to its room, then
-    // open only that room. A dead link shows an error and nothing else.
+    // open only that room. The resolved room is passed in directly:
+    // hidden rooms are not in the list, and fetching them by id alone
+    // would 404 (that was the "room doesn't exist" bug). A dead link
+    // shows an error and nothing else.
     if (focusMode) {
       try {
         const room = await api("/api/private/" + encodeURIComponent(privateCode));
-        await selectRoom(room.id);
+        await selectRoom(room.id, "", room);
       } catch (e) {
         alert("این لینک خصوصی دیگر معتبر نیست — ممکن است OP آن را حذف کرده باشد");
       }
@@ -760,6 +809,30 @@
 
   (async function boot() {
     loadVersion();
+    // Private link? /r/<code> — if already logged in, use the normal
+    // flow; otherwise show the guest screen (room password only).
+    if (focusMode) {
+      try {
+        const meData = await api("/api/me");
+        if (meData.authenticated) {
+          isOP = !!meData.is_op;
+          if (!meData.has_name) {
+            show("identity");
+            $("identity-role").textContent = isOP ? "👑 OP" : "";
+            const saved = localStorage.getItem("nokhodi_name") || "";
+            if (saved) $("display-name").value = saved;
+            await loadCaptcha();
+            return;
+          }
+          me = meData.display_name;
+          localStorage.setItem("nokhodi_name", me);
+          await enterChat();
+          return;
+        }
+      } catch (_) {}
+      await showPrivateScreen();
+      return;
+    }
     try {
       const meData = await api("/api/me");
       if (!meData.authenticated) { show("login"); return; }

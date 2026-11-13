@@ -42,12 +42,32 @@
           <input id="display-name" type="text" maxlength="30" autocomplete="nickname" placeholder="مثلاً سارا" required>
         </label>
         <label>کپچا — حاصل را بنویسید
-          <span id="captcha-question" class="captcha">…</span>
+          <span id="captcha-question" class="captcha" dir="ltr">…</span>
           <input id="captcha-answer" type="number" inputmode="numeric" placeholder="جواب" required>
         </label>
         <button id="captcha-refresh" type="button" class="link-btn">↻ سوال جدید</button>
         <p id="identity-error" class="error" hidden></p>
         <button class="btn primary" type="submit">ورود به چت</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== Private link: guest entry — only the room password ===== -->
+  <section id="screen-private" class="screen" hidden>
+    <div class="card">
+      <div class="logo">🫛</div>
+      <h1>اتاق نخودی <span class="app-version"></span></h1>
+      <p class="sub">شما با یک لینک خصوصی وارد می‌شوید — فقط رمز همین اتاق لازم است.</p>
+      <h2 id="private-room-name">#…</h2>
+      <form id="private-form">
+        <label>نام نمایشی شما
+          <input id="private-name" type="text" maxlength="30" autocomplete="nickname" placeholder="مثلاً سارا" required>
+        </label>
+        <label id="private-pass-label">رمز اتاق
+          <input id="private-pass" type="password" placeholder="رمز این اتاق">
+        </label>
+        <p id="private-error" class="error" hidden></p>
+        <button id="private-join-btn" class="btn primary" type="submit">ورود به اتاق</button>
       </form>
     </div>
   </section>

@@ -64,11 +64,23 @@ type Room struct {
 
 func (r *Room) Locked() bool { return r.PasswordHash != "" }
 
+// EffectivelyHidden: is this room hidden from the room list for
+// normal users? A room is hidden if the OP marked it hidden, or if
+// it has a private link — a private link is the way in, so the room
+// must not also sit in the public list. #general is exempt: it is
+// the main room and always stays listed, even with a private link.
+func (r *Room) EffectivelyHidden() bool {
+	if r.ID == "general" {
+		return r.Hidden
+	}
+	return r.Hidden || r.PrivateCode != ""
+}
+
 // Public is what the API returns. For a hidden room, the OP alone
 // gets the invite link; everyone else gets nothing at all (see CanSee).
 func (r *Room) Public(isOP bool) map[string]any {
 	m := map[string]any{
-		"id": r.ID, "name": r.Name, "hidden": r.Hidden,
+		"id": r.ID, "name": r.Name, "hidden": r.EffectivelyHidden(),
 		"locked": r.Locked(), "ttl_seconds": r.TTLSeconds,
 		"ttl_label": ttlLabel(r.TTLSeconds),
 	}
@@ -222,6 +234,7 @@ func (rs *RoomStore) All() []*Room {
 // CanSee: does this session even learn that the room exists?
 // OP: everything. Visible room: everyone. Hidden room: only if the
 // session already unlocked it, or the caller supplies the invite token.
+// A guest session (private link) is bound to one room only.
 func (rs *RoomStore) CanSee(sess *Session, r *Room, invite string) bool {
 	if r == nil {
 		return false
@@ -229,7 +242,10 @@ func (rs *RoomStore) CanSee(sess *Session, r *Room, invite string) bool {
 	if sess.IsOP() {
 		return true
 	}
-	if !r.Hidden {
+	if sess.GuestRoom != "" {
+		return r.ID == sess.GuestRoom
+	}
+	if !r.EffectivelyHidden() {
 		return true
 	}
 	if sess.HasRoom(r.ID) {
@@ -238,12 +254,33 @@ func (rs *RoomStore) CanSee(sess *Session, r *Room, invite string) bool {
 	return invite != "" && invite == r.InviteToken
 }
 
+// CanSeeCode is CanSee, but a room's private link code also counts as
+// authorization — it is how a logged-in user reaches a hidden room
+// through /r/<code>. A guest session stays bound to its own room:
+// a code for another room must not let it in.
+func (rs *RoomStore) CanSeeCode(sess *Session, r *Room, invite, code string) bool {
+	if rs.CanSee(sess, r, invite) {
+		return true
+	}
+	if code != "" && r != nil && r.PrivateCode == code {
+		if sess.GuestRoom != "" && sess.GuestRoom != r.ID {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
 // CanAccess: can this session read/send in the room?
 // OP: always. Anyone else: only after a successful join (unlocked).
 // Open visible rooms are joined with an empty password, so joining
 // is one click; locked/hidden rooms need their password first.
+// A guest session can never access any room but its own.
 func (rs *RoomStore) CanAccess(sess *Session, r *Room) bool {
 	if r == nil || sess == nil {
+		return false
+	}
+	if sess.GuestRoom != "" && r.ID != sess.GuestRoom {
 		return false
 	}
 	return sess.HasRoom(r.ID)

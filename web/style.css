@@ -57,6 +57,7 @@ input:focus { outline: 2px solid var(--pea); border-color: var(--pea); backgroun
   display: block; text-align: center; font-size: 22px; font-weight: 800;
   background: #f4f7ec; border: 1px dashed var(--pea);
   border-radius: 12px; padding: 10px; color: var(--pea-dark);
+  direction: ltr; unicode-bidi: isolate;
 }
 .link-btn { background: none; border: 0; color: var(--pea-dark); font: inherit; font-size: 13px; cursor: pointer; justify-self: start; padding: 0; }
 

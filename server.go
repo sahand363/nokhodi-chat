@@ -294,6 +294,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"display_name": sess.DisplayName, "title": s.cfg.Title,
 		"role": sess.Role, "is_op": sess.IsOP(),
 		"unlocked_rooms": sess.UnlockedRooms,
+		"guest_room":     sess.GuestRoom,
 	})
 }
 
@@ -440,7 +441,8 @@ func (s *Server) roomForRequest(w http.ResponseWriter, r *http.Request, sess *Se
 		writeErr(w, http.StatusNotFound, "room not found")
 		return nil
 	}
-	if !s.rooms.CanSee(sess, room, r.URL.Query().Get("invite")) {
+	// ?invite= (hidden link) or ?code= (private link) also count.
+	if !s.rooms.CanSeeCode(sess, room, r.URL.Query().Get("invite"), r.URL.Query().Get("code")) {
 		writeErr(w, http.StatusNotFound, "room not found")
 		return nil
 	}
@@ -506,8 +508,9 @@ func (s *Server) handleRoomJoin(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	var in struct {
-		Password string `json:"password"`
-		Invite   string `json:"invite"`
+		Password    string `json:"password"`
+		Invite      string `json:"invite"`
+		PrivateCode string `json:"private_code"`
 	}
 	_ = decodeJSON(r, &in)
 	// Invite can also come from the URL (?invite=...), for hidden links.
@@ -519,7 +522,14 @@ func (s *Server) handleRoomJoin(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, http.StatusNotFound, "room not found")
 		return
 	}
-	if !s.rooms.CanSee(sess, room, in.Invite) {
+	// A guest session is bound to its one room and can never join another.
+	if sess.GuestRoom != "" && id != sess.GuestRoom {
+		writeErr(w, http.StatusForbidden, "this link is only for one room")
+		return
+	}
+	// The room's private link code also authorizes the join — this is
+	// what lets a logged-in user enter a hidden room through /r/<code>.
+	if !s.rooms.CanSeeCode(sess, room, in.Invite, in.PrivateCode) {
 		writeErr(w, http.StatusNotFound, "room not found")
 		return
 	}
@@ -796,26 +806,89 @@ func (s *Server) handleAdminBans(w http.ResponseWriter, r *http.Request) {
 // --- Private room links + secret front door (v2.3) ---
 
 // handlePrivateResolve is GET /api/private/{code} — turns a private
-// link code into the room it opens. Requires a logged-in user; the
-// code itself is the secret, and the room password (if any) is still
-// asked for when joining. Unknown codes return 404, leaking nothing.
+// link code into the room it opens. It is public on purpose: the code
+// itself is the secret (14 random characters), and the room password
+// (if any) is still asked for when entering. Unknown codes return 404,
+// leaking nothing. POST /api/private/{code}/enter is the guest entry
+// (see handlePrivateEnter).
 func (s *Server) handlePrivateResolve(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/private/")
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 2 && parts[1] == "enter" {
+		s.handlePrivateEnter(w, r, parts[0])
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
-	sess := s.requireIdentity(w, r)
-	if sess == nil {
-		return
-	}
-	code := strings.TrimPrefix(r.URL.Path, "/api/private/")
-	code = strings.Trim(code, "/")
+	code := parts[0]
 	room := s.rooms.GetByPrivateCode(code)
 	if room == nil {
 		writeErr(w, http.StatusNotFound, "link not found — it may have been deleted by the OP")
 		return
 	}
-	writeJSON(w, http.StatusOK, room.Public(sess.IsOP()))
+	writeJSON(w, http.StatusOK, room.Public(false))
+}
+
+// handlePrivateEnter is POST /api/private/{code}/enter — the guest
+// entry for a private link. One password only: the room's own.
+// No main login, no captcha — the 14-character link code plus the
+// room password are the gate. The session it creates is bound to
+// that one room (GuestRoom) and can never enter another room.
+func (s *Server) handlePrivateEnter(w http.ResponseWriter, r *http.Request, code string) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	room := s.rooms.GetByPrivateCode(code)
+	if room == nil {
+		writeErr(w, http.StatusNotFound, "link not found — it may have been deleted by the OP")
+		return
+	}
+	var in struct {
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if !s.rooms.CheckRoomPassword(room, in.Password) {
+		writeErr(w, http.StatusUnauthorized, "رمز اتاق اشتباه است")
+		return
+	}
+	if s.bans.IsBanned(in.DisplayName) {
+		writeErr(w, http.StatusForbidden, "that display name is banned")
+		return
+	}
+	sess, err := s.sessions.Create("user")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not create session")
+		return
+	}
+	if err := s.sessions.SetGuestRoom(sess.Token, room.ID); err != nil {
+		s.sessions.Delete(sess.Token)
+		writeErr(w, http.StatusInternalServerError, "could not create session")
+		return
+	}
+	if err := s.sessions.SetName(sess.Token, in.DisplayName); err != nil {
+		s.sessions.Delete(sess.Token)
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.sessions.UnlockRoom(sess.Token, room.ID)
+	s.setSessionCookie(w, sess)
+	name := strings.TrimSpace(in.DisplayName)
+	http.SetCookie(w, &http.Cookie{
+		Name: nameCookie, Value: name, Path: "/",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   s.cfg.SessionDays * 24 * 3600, Expires: sess.ExpiresAt,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "display_name": name, "role": "user", "is_op": false,
+		"guest_room": room.ID, "room": room.Public(false),
+	})
 }
 
 // handleRoomPrivateLink is POST/DELETE /api/rooms/{id}/private-link.

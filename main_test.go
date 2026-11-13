@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -335,5 +336,105 @@ func TestSecretPathDefaultsOff(t *testing.T) {
 	cfg := defaultConfig()
 	if cfg.SecretPath != "" {
 		t.Fatalf("SecretPath = %q, want empty (front door off by default)", cfg.SecretPath)
+	}
+}
+
+func TestPrivateLinkHidesRoom(t *testing.T) {
+	dir := t.TempDir()
+	rs, err := NewRoomStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := &Session{Role: "user"}
+	op := &Session{Role: "op"}
+	r, err := rs.Create("openroom", "", false, TTLNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rs.CanSee(user, r, "") {
+		t.Fatal("visible room must be listed for normal users before any private link")
+	}
+	if _, err := rs.SetPrivateCode(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rs.CanSee(user, r, "") {
+		t.Fatal("a room with a private link must NOT be in the room list for normal users")
+	}
+	if !rs.CanSee(user, r, r.InviteToken) {
+		t.Fatal("the hidden invite link must still open the room in the full chat")
+	}
+	if !rs.CanSee(op, r, "") {
+		t.Fatal("OP must still see a room with a private link")
+	}
+	if r.Public(false)["hidden"] != true {
+		t.Fatal("Public must report a private-link room as hidden, matching what guests see")
+	}
+	if err := rs.DeletePrivateCode(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !rs.CanSee(user, r, "") {
+		t.Fatal("deleting the private link must put the room back in the list")
+	}
+	// #general is exempt: a private link for the main room must not
+	// hide it from everyone.
+	general := rs.Get("general")
+	if _, err := rs.SetPrivateCode("general"); err != nil {
+		t.Fatal(err)
+	}
+	if !rs.CanSee(user, general, "") {
+		t.Fatal("#general must stay listed even with a private link")
+	}
+}
+
+func TestPrivateCodeAuthorizesJoin(t *testing.T) {
+	dir := t.TempDir()
+	rs, err := NewRoomStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := &Session{Role: "user"}
+	r, err := rs.Create("hiddenroom", "roompass", true, TTLNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := rs.SetPrivateCode(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs.CanSeeCode(user, r, "", "wrongcode1234") {
+		t.Fatal("a wrong private code must not authorize anything")
+	}
+	if !rs.CanSeeCode(user, r, "", code) {
+		t.Fatal("the room's own private code must authorize seeing/joining it")
+	}
+	// A guest bound to another room cannot use this room's code.
+	guest := &Session{Role: "user", GuestRoom: "general", UnlockedRooms: []string{"general"}}
+	if rs.CanSeeCode(guest, r, "", code) {
+		t.Fatal("a guest bound to one room must not enter another room with its code")
+	}
+	if rs.CanAccess(guest, r) {
+		t.Fatal("a guest must never access a room other than its own")
+	}
+	if !rs.CanAccess(guest, &Room{ID: "general"}) {
+		t.Fatal("a guest must access its own room")
+	}
+	if rs.CanSee(guest, r, "") {
+		t.Fatal("a guest must not even see another room in the list")
+	}
+}
+
+func TestCaptchaQuestionLTR(t *testing.T) {
+	c := NewCaptchaStore()
+	for i := 0; i < 20; i++ {
+		_, q, err := c.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(q, "؟") {
+			t.Fatalf("captcha question %q still contains the RTL question mark", q)
+		}
+		if !strings.HasSuffix(q, "?") {
+			t.Fatalf("captcha question %q must end with an ASCII ?", q)
+		}
 	}
 }

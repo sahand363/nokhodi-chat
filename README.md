@@ -208,7 +208,7 @@ Two ways to share a chat without showing the whole place.
 http://<server-ip>:44044/r/shdvbfsbd4r4t
 ```
 
-Whoever clicks it goes **straight into that one room, full screen** — no room list, no other rooms, no OP panel, no online list, and `/join` and `/list` don't work there. The login password is still asked for first, and the room password too, if the room has one. (If the room has no password, the random link *is* the password — one click and they're in.) The OP can copy the link, make a **new** one (the old one stops working at once), or **delete** it. This replaces the old hidden-room invite link for one-to-one sharing — hidden rooms still exist for the room list, private links exist for a single guest.
+Whoever clicks it goes **straight into that one room, full screen** — no room list, no other rooms, no OP panel, no online list, and `/join` and `/list` don't work there. They enter with **just the room password** — no main login, no captcha. (If the room has no password, they just type a name and they're in.) Someone who is already logged in opens the same link through the normal flow instead. The OP can copy the link, make a **new** one (the old one stops working at once), or **delete** it. A room with a private link is also hidden from the room list for everyone else (except #general, which always stays listed) — the link is the way in. Deleting the link puts the room back in the list. This replaces the old hidden-room invite link for one-to-one sharing — hidden rooms still exist for the room list, private links exist for a single guest. The old invite link still works for opening a hidden room inside the full chat, from the OP panel's "⋯ بیشتر".
 
 **Secret front door.** Hides the main chat itself behind a random path:
 
@@ -463,6 +463,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.4.0** — Four private-link fixes: (1) a room with a private link is hidden from the room list (except #general); (2) fixed "room doesn't exist" — hidden rooms could not be opened through a private link at all, because the room lookup rejected them before the join; (3) guests enter with just the room password — no main login, no captcha — and the session is bound to that one room only; (4) the maths captcha now uses an ASCII `?` and renders left-to-right, fixing the RTL display.
 - **v2.3.1** — Simpler OP panel: one button per room (copy the private link, or make one), the link shown short as `…/r/<code>`, and everything else (new link, delete link, hidden link, delete room) tucked behind a small "⋯ بیشتر". Nothing removed, just tidier.
 - **v2.3.0** — Private room links (`/r/<random>` — focus mode, only that room, no sidebar/OP panel/online list, revoke or regenerate any time) and an optional secret front door for the main chat (`/<random>`, `/` returns 404 when on). The SSH menu header now shows the real **Chat link**, and menu option 8 manages the front door. No per-room ports — the random path is the unguessable part.
 - **v2.2.2** — Upload limits changed (50 MB per file, 5 files per user per week, 150 MB per user per day, 200 MB stored — old configs are migrated automatically on restart), notification beep when the tab is in the background (once per 20 messages while away, 🔊/🔇 toggle in the header).

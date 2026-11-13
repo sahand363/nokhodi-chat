@@ -17,11 +17,15 @@ import (
 // restart does not log everyone out — sessions live SessionDays (7 by default).
 // Role is "op" or "user". UnlockedRooms holds the room IDs this session
 // has already entered (room password given / open room joined).
+// GuestRoom is set only for private-link guests: the session entered
+// through /r/<code> with just the room password (no main login), and
+// it may never enter any other room.
 type Session struct {
 	Token         string    `json:"token"`
 	Role          string    `json:"role"`
 	DisplayName   string    `json:"display_name"`
 	UnlockedRooms []string  `json:"unlocked_rooms,omitempty"`
+	GuestRoom     string    `json:"guest_room,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	ExpiresAt     time.Time `json:"expires_at"`
 }
@@ -146,6 +150,18 @@ func (st *SessionStore) SetName(token, name string) error {
 		return fmt.Errorf("session not found — please log in again")
 	}
 	s.DisplayName = name
+	return st.saveLocked()
+}
+
+// SetGuestRoom binds a fresh session to one room (private-link guest).
+func (st *SessionStore) SetGuestRoom(token, roomID string) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	s, ok := st.sessions[token]
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	s.GuestRoom = roomID
 	return st.saveLocked()
 }
 
@@ -339,13 +355,13 @@ func (c *CaptchaStore) New() (id, question string, err error) {
 	a, b2 := randInt(20)+1, randInt(20)+1
 	var answer int
 	if randInt(2) == 0 {
-		question = fmt.Sprintf("%d + %d = ؟", a, b2)
+		question = fmt.Sprintf("%d + %d = ?", a, b2)
 		answer = a + b2
 	} else {
 		if b2 > a {
 			a, b2 = b2, a
 		}
-		question = fmt.Sprintf("%d - %d = ؟", a, b2)
+		question = fmt.Sprintf("%d - %d = ?", a, b2)
 		answer = a - b2
 	}
 	c.mu.Lock()
