@@ -192,10 +192,33 @@ The menu header shows the installed version, so you can see at a glance which ve
 - **Update (option 2)** downloads the latest release and restarts the service. It keeps `config.json`, `data/rooms.json`, and every room's messages — nothing is wiped.
 - **Status (option 5)** shows the version, the URL, and how many messages and rooms you have.
 - **Uninstall (option 6)** stops the service and removes the program (and the `nokhodichat` shortcut). It asks whether to keep your messages and config.
+- **Secret Front Door (option 8)** — hides the main chat behind a random link (see below). The menu header always shows the **Chat link** — the real link to the main chat, with the secret path in it when the front door is on — so you can never lock yourself out.
 
 > **Menu tip:** if the menu ever prints "Invalid choice." without you typing anything, it was started from a pipe (for example, at the end of the `curl ... | bash` one-liner) instead of from your keyboard. That was fixed in v2.0.1 — the menu now reads from the real terminal and exits cleanly instead of looping. Just run `nokhodichat` from a normal SSH prompt.
 
 ---
+
+## Private room links & secret front door — v2.3.0
+
+Two ways to share a chat without showing the whole place.
+
+**Private room link (focus mode).** In the 👑 OP panel, next to any room, **ساخت لینک خصوصی** makes a link like:
+
+```
+http://<server-ip>:44044/r/shdvbfsbd4r4t
+```
+
+Whoever clicks it goes **straight into that one room, full screen** — no room list, no other rooms, no OP panel, no online list, and `/join` and `/list` don't work there. The login password is still asked for first, and the room password too, if the room has one. (If the room has no password, the random link *is* the password — one click and they're in.) The OP can copy the link, make a **new** one (the old one stops working at once), or **delete** it. This replaces the old hidden-room invite link for one-to-one sharing — hidden rooms still exist for the room list, private links exist for a single guest.
+
+**Secret front door.** Hides the main chat itself behind a random path:
+
+```
+http://<server-ip>:44044/shdvbfsbd4r4t
+```
+
+Visiting just `http://<server-ip>:44044/` then shows nothing (404). Turn it on in the menu (`nokhodichat` → **8) Secret Front Door**) or in the OP panel (**ورود مخفی به چت اصلی**), where you can also make a new link or turn it off again. The menu header always shows the current **Chat link**, so you can never lock yourself out of your own chat. This is obscurity, not security — it stops casual snoops and scanners, but the login password is still the real protection, so keep both.
+
+**What about a different port per room?** Deliberately not built: a port number is easy to guess and scan, and every room would need its own firewall rule, service, and SSL certificate. The random path in the link is unguessable in a way a port number never is, and needs no extra setup.
 
 ## SSL / TLS — optional, from the menu
 
@@ -371,6 +394,9 @@ Update never deletes `config.json` or `data/`. Upgrading from v1 moves the old `
 | `/api/rooms/{id}/events` | GET | Joined | SSE live feed for that room |
 | `/api/rooms/{id}/online` | GET | Joined | Who is online in the room |
 | `/api/admin/passwords` | POST | OP | Change the OP or user password |
+| `/api/private/{code}` | GET | Session | Resolve a private room link to its room (404 for a dead link) |
+| `/api/rooms/{id}/private-link` | GET / POST / DELETE | OP | Show / create-or-regenerate / delete a room's private link |
+| `/api/admin/secret-path` | GET / POST | OP | Secret front door — `{action: enable, disable, regenerate}` |
 | `/api/admin/ban` | POST | OP | Ban a display name (and log them out) |
 | `/api/admin/bans` | GET | OP | List banned names |
 | `/api/admin/unban` | POST | OP | Unban a display name |
@@ -437,6 +463,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.3.0** — Private room links (`/r/<random>` — focus mode, only that room, no sidebar/OP panel/online list, revoke or regenerate any time) and an optional secret front door for the main chat (`/<random>`, `/` returns 404 when on). The SSH menu header now shows the real **Chat link**, and menu option 8 manages the front door. No per-room ports — the random path is the unguessable part.
 - **v2.2.2** — Upload limits changed (50 MB per file, 5 files per user per week, 150 MB per user per day, 200 MB stored — old configs are migrated automatically on restart), notification beep when the tab is in the background (once per 20 messages while away, 🔊/🔇 toggle in the header).
 - **v2.2.1** — Version badge in the chat header (and login screen), no-cache headers so a reloaded tab always gets the new page, 📎 moved next to the send button with a visible background, SSH menu is plain ASCII only (no Persian characters — the old box-drawing header showed as boxes in some terminals).
 - **v2.2.0** — Images and files in chat: 📎 upload button, images (incl. animated GIFs) shown big, other files as download cards, per-user limits (10 MB per file, 20 files / 100 MB per day, 200 MB stored), files deleted with their message.

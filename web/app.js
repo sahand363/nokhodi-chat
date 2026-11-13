@@ -16,6 +16,20 @@
   let presenceTimer = null;
   let onlineTimer = null;
 
+  // v2.3: private room link /r/<code> — focus mode. The guest sees
+  // ONLY that one room: no room list, no OP panel, no online list,
+  // and /join and /list are disabled. The room password (if any) is
+  // still asked for, and the login password is still asked for first.
+  const privateMatch = location.pathname.match(/^\/r\/([a-z0-9]+)\/?$/);
+  const privateCode = privateMatch ? privateMatch[1] : "";
+  const focusMode = !!privateCode;
+  function applyFocusMode() {
+    if (!focusMode) return;
+    document.body.classList.add("focus-mode");
+    $("rooms-open").hidden = true;
+    $("op-panel-btn").hidden = true;
+  }
+
   // --- Notification sound (v2.2.2) ---
   // Beeps when the tab is in the background (hidden) and someone else
   // sends a message — but only once per 20 messages while you are away,
@@ -398,6 +412,11 @@
       input.value = "";
       return;
     }
+    if (focusMode && (text === "/list" || text.startsWith("/join "))) {
+      alert("این لینک فقط برای همین اتاق است — اتاق دیگری در اینجا دیده نمی‌شود");
+      input.value = "";
+      return;
+    }
     if (text === "/list") {
       await loadRooms();
       input.value = "";
@@ -496,8 +515,64 @@
   $("op-panel-btn").addEventListener("click", async () => {
     $("op-modal").hidden = false;
     renderOPRooms();
+    loadSecretPath();
+  });
+
+  // Secret front door (v2.3): the main chat opens only at /<random>.
+  // The SSH menu always shows the current link, so the OP can never
+  // lock themself out.
+  let secretPathURL = "";
+  async function loadSecretPath() {
+    try {
+      const data = await api("/api/admin/secret-path");
+      secretPathURL = data.url || "";
+      if (data.enabled) {
+        $("secret-path-text").textContent = "ورود مخفی فعال است — چت اصلی فقط از این لینک باز می‌شود: " + secretPathURL;
+        $("secret-copy-btn").hidden = false;
+        $("secret-enable-btn").hidden = true;
+        $("secret-regen-btn").hidden = false;
+        $("secret-disable-btn").hidden = false;
+      } else {
+        $("secret-path-text").textContent = "ورود مخفی خاموش است — چت اصلی از / باز می‌شود.";
+        secretPathURL = "";
+        $("secret-copy-btn").hidden = true;
+        $("secret-enable-btn").hidden = false;
+        $("secret-regen-btn").hidden = true;
+        $("secret-disable-btn").hidden = true;
+      }
+    } catch (e) { $("secret-path-text").textContent = "خطا در خواندن وضعیت ورود مخفی"; }
+  }
+  async function secretPathAction(action) {
+    try {
+      await api("/api/admin/secret-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      await loadSecretPath();
+    } catch (e) { alert(e.message); }
+  }
+  $("secret-enable-btn").addEventListener("click", () => secretPathAction("enable"));
+  $("secret-regen-btn").addEventListener("click", async () => {
+    if (!confirm("لینک ورود مخفی عوض می‌شود و لینک قبلی از کار می‌افتد. ادامه؟")) return;
+    await secretPathAction("regenerate");
+  });
+  $("secret-disable-btn").addEventListener("click", async () => {
+    if (!confirm("ورود مخفی خاموش شود و چت اصلی دوباره از / باز شود؟")) return;
+    await secretPathAction("disable");
+  });
+  $("secret-copy-btn").addEventListener("click", async () => {
+    if (!secretPathURL) return;
+    try { await navigator.clipboard.writeText(secretPathURL); $("secret-copy-btn").textContent = "کپی شد ✓"; } catch (_) { prompt("لینک اصلی:", secretPathURL); }
   });
   $("op-close").addEventListener("click", () => { $("op-modal").hidden = true; });
+
+  // Base path for links: if the OP opened the chat via the secret
+  // front door (/shdvbfsbd4r4t), room links must keep that base path.
+  function linkBase() {
+    const p = location.pathname;
+    return (p === "/" || p.startsWith("/r/")) ? "" : p;
+  }
 
   function renderOPRooms() {
     const box = $("op-rooms-list");
@@ -505,7 +580,7 @@
     rooms.forEach((r) => {
       const row = document.createElement("div");
       row.className = "op-room";
-      const link = location.origin + "/?room=" + r.id + "&invite=" + (r.invite_token || "");
+      const link = location.origin + linkBase() + "/?room=" + r.id + "&invite=" + (r.invite_token || "");
       row.innerHTML = "<strong>#" + r.name + "</strong> " + (r.locked ? "🔒 " : "") + (r.hidden ? "👁‍🗨 مخفی " : "") + "<br><small>" + ttlText(r.ttl_seconds) + "</small>";
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
@@ -514,6 +589,45 @@
         try { await navigator.clipboard.writeText(link); copyBtn.textContent = "کپی شد ✓"; } catch (_) { prompt("لینک اتاق:", link); }
       });
       row.appendChild(copyBtn);
+      // Private link (v2.3): /r/<code> opens only this room, no sidebar.
+      const privateURL = r.private_code ? (location.origin + "/r/" + r.private_code) : "";
+      if (privateURL) {
+        const priv = document.createElement("small");
+        priv.textContent = "لینک خصوصی: " + privateURL;
+        row.appendChild(document.createElement("br"));
+        row.appendChild(priv);
+        const copyPriv = document.createElement("button");
+        copyPriv.type = "button";
+        copyPriv.textContent = "کپی لینک خصوصی";
+        copyPriv.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(privateURL); copyPriv.textContent = "کپی شد ✓"; } catch (_) { prompt("لینک خصوصی:", privateURL); }
+        });
+        row.appendChild(copyPriv);
+        const regen = document.createElement("button");
+        regen.type = "button";
+        regen.textContent = "لینک جدید";
+        regen.addEventListener("click", async () => {
+          if (!confirm("لینک خصوصی فعلی از کار می‌افتد و یک لینک جدید ساخته می‌شود. ادامه؟")) return;
+          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "POST" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
+        });
+        row.appendChild(regen);
+        const delLink = document.createElement("button");
+        delLink.type = "button";
+        delLink.textContent = "حذف لینک";
+        delLink.addEventListener("click", async () => {
+          if (!confirm("لینک خصوصی حذف شود؟")) return;
+          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "DELETE" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
+        });
+        row.appendChild(delLink);
+      } else {
+        const make = document.createElement("button");
+        make.type = "button";
+        make.textContent = "ساخت لینک خصوصی";
+        make.addEventListener("click", async () => {
+          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "POST" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
+        });
+        row.appendChild(make);
+      }
       if (r.id !== "general") {
         const del = document.createElement("button");
         del.type = "button";
@@ -591,7 +705,19 @@
   async function enterChat() {
     $("me-name").textContent = me + (isOP ? " 👑 OP" : "");
     show("chat");
+    applyFocusMode();
     await loadRooms();
+    // Private room link? /r/<code> — resolve it to its room, then
+    // open only that room. A dead link shows an error and nothing else.
+    if (focusMode) {
+      try {
+        const room = await api("/api/private/" + encodeURIComponent(privateCode));
+        await selectRoom(room.id);
+      } catch (e) {
+        alert("این لینک خصوصی دیگر معتبر نیست — ممکن است OP آن را حذف کرده باشد");
+      }
+      return;
+    }
     // Hidden-room link? ?room=<id>&invite=<token>
     const params = new URLSearchParams(location.search);
     const linkRoom = params.get("room");

@@ -95,6 +95,24 @@ func (s *Server) routes() http.Handler {
 		// (An already-open tab still needs a reload — updating the
 		// server cannot reload a page that is already open.)
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		// v2.3: secret front door. When SecretPath is set, "/" returns
+		// 404 and the chat only opens at "/<SecretPath>". Private room
+		// links /r/<code> always open (the code itself is the secret).
+		// Assets (/style.css, /app.js) are public — they carry no secret.
+		if s.cfg.SecretPath != "" && r.URL.Path == "/" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/"+s.cfg.SecretPath || strings.HasPrefix(r.URL.Path, "/r/") {
+			data, err := webFS.ReadFile("web/index.html")
+			if err != nil {
+				http.Error(w, "frontend missing", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(data)
+			return
+		}
 		if r.URL.Path != "/" {
 			http.FileServer(http.FS(web)).ServeHTTP(w, r)
 			return
@@ -114,7 +132,8 @@ func (s *Server) routes() http.Handler {
 			"messages": s.store.TotalCount(), "rooms": len(s.rooms.All()),
 			"online": s.broker.Count(""),
 			"tls":    s.cfg.TLSEnabled, "tls_mode": s.cfg.TLSMode,
-			"url": fmt.Sprintf("%s://<server-ip>:%d", s.cfg.scheme(), s.cfg.Port),
+			"url":                 fmt.Sprintf("%s://<server-ip>:%d", s.cfg.scheme(), s.cfg.Port),
+			"secret_path_enabled": s.cfg.SecretPath != "",
 		})
 	})
 	mux.HandleFunc("/api/captcha", s.handleCaptcha)
@@ -129,6 +148,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/admin/ban", s.handleAdminBan)
 	mux.HandleFunc("/api/admin/unban", s.handleAdminUnban)
 	mux.HandleFunc("/api/admin/bans", s.handleAdminBans)
+	mux.HandleFunc("/api/admin/secret-path", s.handleAdminSecretPath)
+	mux.HandleFunc("/api/private/", s.handlePrivateResolve)
 	// Legacy v1 aliases: the single room is now #general.
 	mux.HandleFunc("/api/messages", s.handleLegacyMessages)
 	mux.HandleFunc("/api/events", s.handleLegacyEvents)
@@ -384,6 +405,8 @@ func (s *Server) handleRoomSub(w http.ResponseWriter, r *http.Request) {
 		s.handleRoom(w, r, id)
 	case "join":
 		s.handleRoomJoin(w, r, id)
+	case "private-link":
+		s.handleRoomPrivateLink(w, r, id)
 	case "upload":
 		s.handleRoomUpload(w, r, id)
 	case "messages":
@@ -768,6 +791,147 @@ func (s *Server) handleAdminBans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"banned": s.bans.List()})
+}
+
+// --- Private room links + secret front door (v2.3) ---
+
+// handlePrivateResolve is GET /api/private/{code} — turns a private
+// link code into the room it opens. Requires a logged-in user; the
+// code itself is the secret, and the room password (if any) is still
+// asked for when joining. Unknown codes return 404, leaking nothing.
+func (s *Server) handlePrivateResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	sess := s.requireIdentity(w, r)
+	if sess == nil {
+		return
+	}
+	code := strings.TrimPrefix(r.URL.Path, "/api/private/")
+	code = strings.Trim(code, "/")
+	room := s.rooms.GetByPrivateCode(code)
+	if room == nil {
+		writeErr(w, http.StatusNotFound, "link not found — it may have been deleted by the OP")
+		return
+	}
+	writeJSON(w, http.StatusOK, room.Public(sess.IsOP()))
+}
+
+// handleRoomPrivateLink is POST/DELETE /api/rooms/{id}/private-link.
+// OP only. POST creates (or regenerates) the room's private link;
+// DELETE removes it. The link is /r/<code> and opens only that room.
+func (s *Server) handleRoomPrivateLink(w http.ResponseWriter, r *http.Request, id string) {
+	if s.requireOP(w, r) == nil {
+		return
+	}
+	room := s.rooms.Get(id)
+	if room == nil {
+		writeErr(w, http.StatusNotFound, "room not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"room_id": room.ID, "private_code": room.PrivateCode,
+			"url": privateLinkURL(r, room.PrivateCode),
+		})
+	case http.MethodPost:
+		code, err := s.rooms.SetPrivateCode(id)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"room_id": id, "private_code": code, "url": privateLinkURL(r, code),
+		})
+	case http.MethodDelete:
+		if err := s.rooms.DeletePrivateCode(id); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "GET, POST or DELETE only")
+	}
+}
+
+func privateLinkURL(r *http.Request, code string) string {
+	if code == "" {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/r/%s", scheme, r.Host, code)
+}
+
+// handleAdminSecretPath is GET/POST /api/admin/secret-path — OP only.
+// POST {"action": "enable"|"disable"|"regenerate"} controls the secret
+// front door. The menu always shows the current link, so the OP can
+// never lock themself out of their own chat.
+func (s *Server) handleAdminSecretPath(w http.ResponseWriter, r *http.Request) {
+	if s.requireOP(w, r) == nil {
+		return
+	}
+	if r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, secretPathResponse(r, s.cfg))
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "GET or POST only")
+		return
+	}
+	var in struct {
+		Action string `json:"action"` // enable, disable, regenerate
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	switch in.Action {
+	case "enable":
+		if s.cfg.SecretPath == "" {
+			code, err := newRandomCode(14)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "could not generate a code")
+				return
+			}
+			s.cfg.SecretPath = code
+		}
+	case "disable":
+		s.cfg.SecretPath = ""
+	case "regenerate":
+		code, err := newRandomCode(14)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "could not generate a code")
+			return
+		}
+		s.cfg.SecretPath = code
+	default:
+		writeErr(w, http.StatusBadRequest, "action must be enable, disable or regenerate")
+		return
+	}
+	if err := saveConfig(s.cfgPath, s.cfg); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not save config")
+		return
+	}
+	writeJSON(w, http.StatusOK, secretPathResponse(r, s.cfg))
+}
+
+func secretPathResponse(r *http.Request, cfg *Config) map[string]any {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	url := ""
+	if cfg.SecretPath != "" {
+		url = fmt.Sprintf("%s://%s/%s", scheme, r.Host, cfg.SecretPath)
+	}
+	return map[string]any{
+		"enabled": cfg.SecretPath != "", "secret_path": cfg.SecretPath, "url": url,
+	}
 }
 
 // --- Legacy v1 aliases (single room = #general) ---

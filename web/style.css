@@ -60,6 +60,13 @@ input:focus { outline: 2px solid var(--pea); border-color: var(--pea); backgroun
 }
 .link-btn { background: none; border: 0; color: var(--pea-dark); font: inherit; font-size: 13px; cursor: pointer; justify-self: start; padding: 0; }
 
+/* --- Focus mode (v2.3): a private room link /r/<code> shows ONLY
+   that one room — no room list, no OP panel, no online list. --- */
+body.focus-mode .rooms-panel { display: none !important; }
+body.focus-mode #rooms-open { display: none !important; }
+body.focus-mode #op-panel-btn { display: none !important; }
+body.focus-mode #online-box { display: none !important; }
+
 /* --- Chat + rooms (v2) --- */
 .chat-screen { height: 100dvh; }
 .layout { display: flex; flex: 1; min-height: 0; }

@@ -35,7 +35,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-var version = "2.2.2"
+var version = "2.3.0"
 
 // Config is the on-disk schema for config.json. Passwords are NEVER
 // stored in plain text — only salted SHA-256 hashes.
@@ -72,6 +72,26 @@ type Config struct {
 	MaxUploadsPerUserPerWeek    int   `json:"max_uploads_per_user_per_week"`
 	MaxUploadBytesPerUserPerDay int64 `json:"max_upload_bytes_per_user_per_day"`
 	MaxUploadBytesPerUserTotal  int64 `json:"max_upload_bytes_per_user_total"`
+	// v2.3: secret front door. Empty = off, the chat opens at "/".
+	// When set, "/" returns 404 and the chat only opens at
+	// "/<SecretPath>" — the menu always shows the current link, so
+	// the OP can never lock themself out.
+	SecretPath string `json:"secret_path,omitempty"`
+}
+
+// newRandomCode makes an unguessable random code like "shdvbfsbd4r4t"
+// (lowercase letters + digits) for private room links and the secret
+// front door. Used for links, never for passwords.
+func newRandomCode(n int) (string, error) {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(b), nil
 }
 
 // scheme returns "https" when TLS is on, "http" otherwise.
@@ -282,6 +302,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "secret":
+			if err := runSecret(*configPath); err != nil {
+				log.Fatal(err)
+			}
+			return
 		}
 	}
 
@@ -425,5 +450,74 @@ func runTLS(configPath string) error {
 		return err
 	}
 	fmt.Printf("TLS enabled in %s (mode %s, domain %q) — restart the service to use https\n", *cfgPath, *mode, *domain)
+	return nil
+}
+
+// runSecret implements `./nokhodi-chat secret ...` — how manage.sh
+// and the OP panel turn the secret front door on/off, without
+// hand-editing config.json.
+//
+//	nokhodi-chat secret -enable true    (generates a random path if none yet)
+//	nokhodi-chat secret -enable false   (back to plain "/" — front door off)
+//	nokhodi-chat secret -regenerate     (new random path, old one stops working)
+//	nokhodi-chat secret -show           (prints the current path, or "off")
+func runSecret(configPath string) error {
+	fs := flag.NewFlagSet("secret", flag.ExitOnError)
+	enableStr := fs.String("enable", "", "true to enable the secret front door, false to disable it")
+	regenerate := fs.Bool("regenerate", false, "generate a new random secret path")
+	show := fs.Bool("show", false, "print the current secret path")
+	cfgPath := fs.String("config", configPath, "path to config.json")
+	_ = fs.Parse(os.Args[2:])
+
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if *show {
+		if cfg.SecretPath == "" {
+			fmt.Println("secret front door: off (chat opens at /)")
+		} else {
+			fmt.Printf("secret front door: on — chat opens at /%s\n", cfg.SecretPath)
+		}
+		return nil
+	}
+	if *regenerate {
+		code, err := newRandomCode(14)
+		if err != nil {
+			return err
+		}
+		cfg.SecretPath = code
+		if err := saveConfig(*cfgPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("new secret front door: /%s (old link stops working — restart the service)\n", code)
+		return nil
+	}
+	if *enableStr == "" {
+		return fmt.Errorf("usage: nokhodi-chat secret -enable true|false | -regenerate | -show")
+	}
+	enable, err := strconv.ParseBool(*enableStr)
+	if err != nil {
+		return fmt.Errorf("usage: nokhodi-chat secret -enable true|false")
+	}
+	if !enable {
+		cfg.SecretPath = ""
+		if err := saveConfig(*cfgPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("secret front door disabled in %s (chat opens at / again)\n", *cfgPath)
+		return nil
+	}
+	if cfg.SecretPath == "" {
+		code, err := newRandomCode(14)
+		if err != nil {
+			return err
+		}
+		cfg.SecretPath = code
+	}
+	if err := saveConfig(*cfgPath, cfg); err != nil {
+		return err
+	}
+	fmt.Printf("secret front door enabled in %s — chat opens at /%s (restart the service)\n", *cfgPath, cfg.SecretPath)
 	return nil
 }

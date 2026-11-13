@@ -63,6 +63,20 @@ tls_cert()    { [ -f "$CONFIG" ] && grep -o '"tls_cert_file": *"[^"]*"' "$CONFIG
 
 scheme() { if tls_enabled; then echo "https"; else echo "http"; fi; }
 
+# Secret front door (v2.3): when config.json has a secret_path, the
+# chat only opens at /<secret_path> and "/" returns 404. The main
+# chat link shown in this menu is always the real link, so the OP
+# can never lock themself out.
+secret_path() { [ -f "$CONFIG" ] && grep -o '"secret_path": *"[^"]*"' "$CONFIG" | sed 's/.*: *"//; s/"$//' || echo ""; }
+secret_status_line() {
+  local sp; sp="$(secret_path)"
+  if [ -n "$sp" ]; then echo "Front door: SECRET ON (only the link below works)"; else echo "Front door: OFF (chat opens at /)"; fi
+}
+chat_link() {
+  local sp; sp="$(secret_path)"
+  if [ -n "$sp" ]; then echo "$(scheme)://$(server_ip):$PORT/$sp"; else echo "$(scheme)://$(server_ip):$PORT"; fi
+}
+
 restart_service() {
   if has_systemd; then
     systemctl restart "$SERVICE" 2>/dev/null || systemctl start "$SERVICE" 2>/dev/null || true
@@ -199,6 +213,39 @@ do_ssl_reissue() {
     2) do_ssl_letsencrypt ;;
     *) warn "Cancelled - SSL is off for now."; pause ;;
   esac
+}
+
+do_secret_menu() {
+  while true; do
+    clear
+    echo -e "${GREEN}+------------------------------------------+${NC}"
+    echo -e "${GREEN}|     Nokhodi Chat - Secret Front Door    |${NC}"
+    echo -e "${GREEN}+------------------------------------------+${NC}"
+    echo -e "  $(secret_status_line)"
+    echo -e "  Chat link: ${CYAN}$(chat_link)${NC}"
+    echo "  (When the secret door is ON, visiting just"
+    echo "   http://<ip>:44044/ shows nothing - only this"
+    echo "   link opens the chat. The login password is"
+    echo "   still asked for. This menu always shows the"
+    echo "   current link, so you can never lock yourself out.)"
+    echo
+    echo "  1) Enable secret front door (random link)"
+    echo "  2) Disable (back to plain /)"
+    echo "  3) New random link (the old one stops working)"
+    echo "  0) Back to main menu"
+    echo
+    if ! read -rp "Choose [0-3]: " choice; then
+      echo; echo "Input closed - exiting menu."
+      exit 0
+    fi
+    case "$choice" in
+      1) "$BIN" secret -config "$CONFIG" -enable true && { ok "Secret front door enabled."; info "Restarting the service..."; restart_service; info "Chat link: $(chat_link)"; } || err "Failed to enable."; pause ;;
+      2) "$BIN" secret -config "$CONFIG" -enable false && { ok "Secret front door disabled."; info "Restarting the service..."; restart_service; } || err "Failed to disable."; pause ;;
+      3) "$BIN" secret -config "$CONFIG" -regenerate && { ok "New secret link generated."; info "Restarting the service..."; restart_service; info "New chat link: $(chat_link)"; } || err "Failed to regenerate."; pause ;;
+      0) return ;;
+      *) warn "Invalid choice."; sleep 1 ;;
+    esac
+  done
 }
 
 do_ssl_menu() {
@@ -355,7 +402,8 @@ do_status() {
   echo "Config:      $([ -f "$CONFIG" ] && echo exists || echo missing)"
   echo "Messages:    $(grep -h -c '"id"' "$INSTALL_DIR"/data/room_*.json 2>/dev/null | awk '{s+=$1} END {print s+0}') stored"
   echo "Rooms:       $([ -f "$INSTALL_DIR/data/rooms.json" ] && grep -c '"id"' "$INSTALL_DIR/data/rooms.json" || echo 0)"
-  echo "URL:         $(scheme)://$(server_ip):$PORT"
+  echo "Chat link:   $(chat_link)"
+  echo "Secret door: $(secret_status_line)"
   echo "SSL:         $(ssl_status_line)"
   if has_systemd; then systemctl status "$SERVICE" --no-pager | head -20
   else curl -fsS "http://127.0.0.1:$PORT/health" || echo "not running"; echo; fi
@@ -394,10 +442,11 @@ while true; do
   echo -e "${GREEN}+------------------------------------------+${NC}"
   echo -e "${GREEN}|     Nokhodi Chat - Management    |${NC}"
   echo -e "${GREEN}+------------------------------------------+${NC}"
-  echo -e "  URL: ${CYAN}$(scheme)://$(server_ip):$PORT${NC}"
+  echo -e "  Chat link: ${CYAN}$(chat_link)${NC}"
   echo -e "  Dir: $INSTALL_DIR"
   echo -e "  Version: $(installed_version)"
   echo -e "  $(ssl_status_line)"
+  echo -e "  $(secret_status_line)"
   echo
   echo "  1) Install / Start Service"
   echo "  2) Update (latest release - keeps messages, rooms & config)"
@@ -406,9 +455,10 @@ while true; do
   echo "  5) Status"
   echo "  6) Uninstall"
   echo "  7) SSL - Enable / Disable / Delete / Re-issue"
+  echo "  8) Secret Front Door - hide the chat behind a random link"
   echo "  0) Exit"
   echo
-  if ! read -rp "Choose [0-7]: " choice; then
+  if ! read -rp "Choose [0-8]: " choice; then
     echo; echo "Input closed - exiting menu."
     exit 0
   fi
@@ -420,6 +470,7 @@ while true; do
     5) do_status ;;
     6) do_uninstall ;;
     7) do_ssl_menu ;;
+    8) do_secret_menu ;;
     0) echo "Bye"; exit 0 ;;
     *) warn "Invalid choice."; sleep 1 ;;
   esac

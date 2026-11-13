@@ -257,3 +257,83 @@ func TestCaptchaVerifyOnce(t *testing.T) {
 		t.Fatal("second verify of a consumed captcha must fail")
 	}
 }
+
+func TestRandomCode(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		code, err := newRandomCode(14)
+		if err != nil {
+			t.Fatalf("newRandomCode: %v", err)
+		}
+		if len(code) != 14 {
+			t.Fatalf("code %q has length %d, want 14", code, len(code))
+		}
+		for _, ch := range code {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+				t.Fatalf("code %q contains non [a-z0-9] character %q", code, ch)
+			}
+		}
+	}
+}
+
+func TestPrivateRoomLink(t *testing.T) {
+	dir := t.TempDir()
+	rs, err := NewRoomStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rs.Create("secretchat", "", false, TTLNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rs.GetByPrivateCode("nope"); got != nil {
+		t.Fatal("unknown private code must resolve to nil")
+	}
+	code, err := rs.SetPrivateCode(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(code) != 14 {
+		t.Fatalf("private code %q has length %d, want 14", code, len(code))
+	}
+	if got := rs.GetByPrivateCode(code); got == nil || got.ID != r.ID {
+		t.Fatal("private code must resolve to its room")
+	}
+	// Regenerate: the old code dies at once.
+	code2, err := rs.SetPrivateCode(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code2 == code {
+		t.Fatal("regenerated code must differ from the old one")
+	}
+	if got := rs.GetByPrivateCode(code); got != nil {
+		t.Fatal("old private code must stop working after regenerate")
+	}
+	if err := rs.DeletePrivateCode(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := rs.GetByPrivateCode(code2); got != nil {
+		t.Fatal("private code must stop working after delete")
+	}
+	// OP sees the code in Public; normal users never do.
+	r2, err := rs.Create("openroom", "", false, TTLNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rs.SetPrivateCode(r2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if r2.Public(false)["private_code"] != nil {
+		t.Fatal("normal users must not see a room's private code")
+	}
+	if r2.Public(true)["private_code"] == "" {
+		t.Fatal("OP must see a room's private code")
+	}
+}
+
+func TestSecretPathDefaultsOff(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.SecretPath != "" {
+		t.Fatalf("SecretPath = %q, want empty (front door off by default)", cfg.SecretPath)
+	}
+}

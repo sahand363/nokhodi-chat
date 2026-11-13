@@ -48,14 +48,18 @@ func ttlLabel(v int64) string {
 // InviteToken link, still need the room password, and return 404 —
 // no name, no messages — to anyone without link + password.
 type Room struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"` // without the leading '#'
-	Hidden       bool      `json:"hidden"`
-	PasswordHash string    `json:"password_hash,omitempty"`
-	Salt         string    `json:"salt,omitempty"`
-	TTLSeconds   int64     `json:"ttl_seconds"`
-	InviteToken  string    `json:"invite_token"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string `json:"id"`
+	Name         string `json:"name"` // without the leading '#'
+	Hidden       bool   `json:"hidden"`
+	PasswordHash string `json:"password_hash,omitempty"`
+	Salt         string `json:"salt,omitempty"`
+	TTLSeconds   int64  `json:"ttl_seconds"`
+	InviteToken  string `json:"invite_token"`
+	// v2.3: private link code, e.g. "shdvbfsbd4r4t". Empty = no private
+	// link. The link /r/<PrivateCode> opens ONLY this room, full screen,
+	// with no room list, OP panel or online list.
+	PrivateCode string    `json:"private_code,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (r *Room) Locked() bool { return r.PasswordHash != "" }
@@ -70,8 +74,70 @@ func (r *Room) Public(isOP bool) map[string]any {
 	}
 	if isOP {
 		m["invite_token"] = r.InviteToken
+		m["private_code"] = r.PrivateCode
 	}
 	return m
+}
+
+// GetByPrivateCode finds the room whose private link code matches,
+// or nil. The code is the secret — anyone who has it may open that
+// room's link (the room password, if any, is still asked for).
+func (rs *RoomStore) GetByPrivateCode(code string) *Room {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if code == "" {
+		return nil
+	}
+	for _, r := range rs.rooms {
+		if r.PrivateCode == code {
+			return r
+		}
+	}
+	return nil
+}
+
+// SetPrivateCode creates (or regenerates) a room's private link code.
+// Returns the new code. The old code stops working at once.
+func (rs *RoomStore) SetPrivateCode(id string) (string, error) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	r, ok := rs.rooms[id]
+	if !ok {
+		return "", fmt.Errorf("room not found")
+	}
+	for {
+		code, err := newRandomCode(14)
+		if err != nil {
+			return "", err
+		}
+		taken := false
+		for _, other := range rs.rooms {
+			if other.PrivateCode == code {
+				taken = true
+				break
+			}
+		}
+		if taken {
+			continue
+		}
+		r.PrivateCode = code
+		if err := rs.saveLocked(); err != nil {
+			return "", err
+		}
+		return code, nil
+	}
+}
+
+// DeletePrivateCode removes a room's private link. The link stops working.
+func (rs *RoomStore) DeletePrivateCode(id string) error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	r, ok := rs.rooms[id]
+	if !ok {
+		return fmt.Errorf("room not found")
+	}
+	r.PrivateCode = ""
+	return rs.saveLocked()
 }
 
 type RoomStore struct {
