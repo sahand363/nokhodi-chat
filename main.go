@@ -35,7 +35,7 @@ import (
 //go:embed web
 var webFS embed.FS
 
-var version = "2.3.0"
+var version = "2.3.1"
 
 // Config is the on-disk schema for config.json. Passwords are NEVER
 // stored in plain text — only salted SHA-256 hashes.

@@ -463,6 +463,7 @@ go run . -config config.json
 
 ## Version history
 
+- **v2.3.1** — Simpler OP panel: one button per room (copy the private link, or make one), the link shown short as `…/r/<code>`, and everything else (new link, delete link, hidden link, delete room) tucked behind a small "⋯ بیشتر". Nothing removed, just tidier.
 - **v2.3.0** — Private room links (`/r/<random>` — focus mode, only that room, no sidebar/OP panel/online list, revoke or regenerate any time) and an optional secret front door for the main chat (`/<random>`, `/` returns 404 when on). The SSH menu header now shows the real **Chat link**, and menu option 8 manages the front door. No per-room ports — the random path is the unguessable part.
 - **v2.2.2** — Upload limits changed (50 MB per file, 5 files per user per week, 150 MB per user per day, 200 MB stored — old configs are migrated automatically on restart), notification beep when the tab is in the background (once per 20 messages while away, 🔊/🔇 toggle in the header).
 - **v2.2.1** — Version badge in the chat header (and login screen), no-cache headers so a reloaded tab always gets the new page, 📎 moved next to the send button with a visible background, SSH menu is plain ASCII only (no Persian characters — the old box-drawing header showed as boxes in some terminals).

@@ -574,6 +574,10 @@
     return (p === "/" || p.startsWith("/r/")) ? "" : p;
   }
 
+  // v2.3.1: one primary action per room — the private link.
+  // Everything else (new link, delete link, hidden link, delete
+  // room) lives behind a small "more" toggle, so the panel stops
+  // showing five buttons under every room.
   function renderOPRooms() {
     const box = $("op-rooms-list");
     box.innerHTML = "";
@@ -582,20 +586,12 @@
       row.className = "op-room";
       const link = location.origin + linkBase() + "/?room=" + r.id + "&invite=" + (r.invite_token || "");
       row.innerHTML = "<strong>#" + r.name + "</strong> " + (r.locked ? "🔒 " : "") + (r.hidden ? "👁‍🗨 مخفی " : "") + "<br><small>" + ttlText(r.ttl_seconds) + "</small>";
-      const copyBtn = document.createElement("button");
-      copyBtn.type = "button";
-      copyBtn.textContent = "کپی لینک مخفی";
-      copyBtn.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(link); copyBtn.textContent = "کپی شد ✓"; } catch (_) { prompt("لینک اتاق:", link); }
-      });
-      row.appendChild(copyBtn);
-      // Private link (v2.3): /r/<code> opens only this room, no sidebar.
       const privateURL = r.private_code ? (location.origin + "/r/" + r.private_code) : "";
       if (privateURL) {
-        const priv = document.createElement("small");
-        priv.textContent = "لینک خصوصی: " + privateURL;
-        row.appendChild(document.createElement("br"));
-        row.appendChild(priv);
+        const short = document.createElement("small");
+        short.className = "dim";
+        short.textContent = "…/r/" + r.private_code;
+        row.appendChild(short);
         const copyPriv = document.createElement("button");
         copyPriv.type = "button";
         copyPriv.textContent = "کپی لینک خصوصی";
@@ -603,22 +599,6 @@
           try { await navigator.clipboard.writeText(privateURL); copyPriv.textContent = "کپی شد ✓"; } catch (_) { prompt("لینک خصوصی:", privateURL); }
         });
         row.appendChild(copyPriv);
-        const regen = document.createElement("button");
-        regen.type = "button";
-        regen.textContent = "لینک جدید";
-        regen.addEventListener("click", async () => {
-          if (!confirm("لینک خصوصی فعلی از کار می‌افتد و یک لینک جدید ساخته می‌شود. ادامه؟")) return;
-          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "POST" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
-        });
-        row.appendChild(regen);
-        const delLink = document.createElement("button");
-        delLink.type = "button";
-        delLink.textContent = "حذف لینک";
-        delLink.addEventListener("click", async () => {
-          if (!confirm("لینک خصوصی حذف شود؟")) return;
-          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "DELETE" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
-        });
-        row.appendChild(delLink);
       } else {
         const make = document.createElement("button");
         make.type = "button";
@@ -628,6 +608,43 @@
         });
         row.appendChild(make);
       }
+      const moreBtn = document.createElement("button");
+      moreBtn.type = "button";
+      moreBtn.className = "more-btn";
+      moreBtn.textContent = "⋯ بیشتر";
+      const more = document.createElement("div");
+      more.className = "op-more";
+      more.hidden = true;
+      moreBtn.addEventListener("click", () => {
+        more.hidden = !more.hidden;
+        moreBtn.textContent = more.hidden ? "⋯ بیشتر" : "⋯ کمتر";
+      });
+      row.appendChild(moreBtn);
+      if (privateURL) {
+        const regen = document.createElement("button");
+        regen.type = "button";
+        regen.textContent = "لینک جدید";
+        regen.addEventListener("click", async () => {
+          if (!confirm("لینک خصوصی فعلی از کار می‌افتد و یک لینک جدید ساخته می‌شود. ادامه؟")) return;
+          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "POST" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
+        });
+        more.appendChild(regen);
+        const delLink = document.createElement("button");
+        delLink.type = "button";
+        delLink.textContent = "حذف لینک";
+        delLink.addEventListener("click", async () => {
+          if (!confirm("لینک خصوصی حذف شود؟")) return;
+          try { await api("/api/rooms/" + encodeURIComponent(r.id) + "/private-link", { method: "DELETE" }); await loadRooms(); renderOPRooms(); } catch (e) { alert(e.message); }
+        });
+        more.appendChild(delLink);
+      }
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.textContent = "کپی لینک مخفی";
+      copyBtn.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(link); copyBtn.textContent = "کپی شد ✓"; } catch (_) { prompt("لینک اتاق:", link); }
+      });
+      more.appendChild(copyBtn);
       if (r.id !== "general") {
         const del = document.createElement("button");
         del.type = "button";
@@ -641,8 +658,9 @@
             if (currentRoom && currentRoom.id === r.id) selectRoom("general");
           } catch (e) { alert(e.message); }
         });
-        row.appendChild(del);
+        more.appendChild(del);
       }
+      row.appendChild(more);
       box.appendChild(row);
     });
   }
